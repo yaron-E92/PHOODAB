@@ -1,5 +1,3 @@
-using System.Reflection;
-
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddEndpointsApiExplorer();
@@ -16,17 +14,8 @@ app.MapGet("/health", () => Results.Ok(new { status = "ok" }))
 
 app.MapGet("/version", () =>
 {
-    var assembly = Assembly.GetEntryAssembly();
-    var version = assembly?.GetName().Version?.ToString() ?? "0.0.0";
-    var informationalVersion = assembly?
-        .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
-        .InformationalVersion ?? version;
-
-    return Results.Ok(new
-    {
-        version,
-        informationalVersion
-    });
+    var version = typeof(Program).Assembly.GetName().Version?.ToString() ?? "0.0.0";
+    return Results.Ok(new { version });
 })
 .WithName("GetVersion")
 .WithOpenApi();

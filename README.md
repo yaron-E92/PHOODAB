@@ -2,7 +2,7 @@
 
 ## Repository Layout
 
-- `phoodab/backend` - .NET 8 backend solution and tests
+- `phoodab/backend` - .NET 10 backend solution and tests
 - `phoodab/apps/web` - React shell consuming generated API client
 - `phoodab/apps/mobile` - mobile placeholder
 - `phoodab/packages/api-client` - TypeScript client generation package
