@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify required files
+        run: |
+          set -euo pipefail
+          test -f README.md
+          test -f docs/adr/ADR-001-initial-architecture.md
+
+      - name: Markdown formatting smoke check
+        run: |
+          set -euo pipefail
+          # Fail on tabs or trailing whitespace in markdown files.
+          ! rg --line-number --pcre2 "\t|[ \t]+$" --glob "*.md" .
