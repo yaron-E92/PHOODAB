@@ -11,6 +11,54 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Detect project changes
+    runs-on: ubuntu-latest
+    outputs:
+      typescript_changed: ${{ steps.filter.outputs.typescript }}
+      dotnet_changed: ${{ steps.filter.outputs.dotnet }}
+      typescript_exists: ${{ steps.detect.outputs.typescript_exists }}
+      dotnet_exists: ${{ steps.detect.outputs.dotnet_exists }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect changed paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            typescript:
+              - '**/package.json'
+              - '**/tsconfig.json'
+              - '**/*.ts'
+              - '**/*.tsx'
+              - '**/package-lock.json'
+              - '**/pnpm-lock.yaml'
+              - '**/yarn.lock'
+            dotnet:
+              - '**/*.sln'
+              - '**/*.csproj'
+              - '**/*.fsproj'
+              - '**/*.cs'
+
+      - name: Detect repository project files (bootstrap-safe)
+        id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git ls-files | rg -q '(package\.json|tsconfig\.json|\.ts$|\.tsx$|package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$'; then
+            echo "typescript_exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "typescript_exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if git ls-files | rg -q '(\.sln$|\.csproj$|\.fsproj$|\.cs$)'; then
+            echo "dotnet_exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "dotnet_exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
   validate:
     name: Validate repository
     runs-on: ubuntu-latest
@@ -29,3 +77,91 @@ jobs:
           set -euo pipefail
           # Fail on tabs or trailing whitespace in markdown files.
           ! rg --line-number --pcre2 "\t|[ \t]+$" --glob "*.md" .
+
+  typescript:
+    name: TypeScript checks
+    runs-on: ubuntu-latest
+    needs: changes
+    # Bootstrap-safe: skip entirely when there are no TS files yet.
+    if: needs.changes.outputs.typescript_changed == 'true' || needs.changes.outputs.typescript_exists == 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f pnpm-lock.yaml ]]; then
+            corepack enable
+            pnpm install --frozen-lockfile
+          elif [[ -f yarn.lock ]]; then
+            corepack enable
+            yarn install --frozen-lockfile
+          elif [[ -f package-lock.json ]]; then
+            npm ci
+          elif [[ -f package.json ]]; then
+            npm install
+          else
+            echo "No Node package manifest in repo root; skipping TS job steps."
+            exit 0
+          fi
+
+      - name: Lint (if script exists)
+        run: npm run lint --if-present
+
+      - name: Typecheck/build (if script exists)
+        run: |
+          npm run typecheck --if-present
+          npm run build --if-present
+
+      - name: Test (if script exists)
+        run: npm test --if-present
+
+  dotnet:
+    name: .NET checks
+    runs-on: ubuntu-latest
+    needs: changes
+    # Bootstrap-safe: skip entirely when there are no .NET files yet.
+    if: needs.changes.outputs.dotnet_changed == 'true' || needs.changes.outputs.dotnet_exists == 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+
+      - name: Restore
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git ls-files | rg -q '(\.sln$|\.csproj$|\.fsproj$)'; then
+            dotnet restore
+          else
+            echo "No .NET solution/project files found; skipping."
+          fi
+
+      - name: Build
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git ls-files | rg -q '(\.sln$|\.csproj$|\.fsproj$)'; then
+            dotnet build --no-restore
+          else
+            echo "No .NET solution/project files found; skipping."
+          fi
+
+      - name: Test
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git ls-files | rg -q '(\.sln$|\.csproj$|\.fsproj$)'; then
+            dotnet test --no-build
+          else
+            echo "No .NET solution/project files found; skipping."
+          fi
