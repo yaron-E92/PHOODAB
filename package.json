@@ -1,0 +1,8 @@
+{
+  "name": "phoodab",
+  "private": true,
+  "workspaces": [
+    "phoodab/apps/web",
+    "phoodab/packages/api-client"
+  ]
+}
