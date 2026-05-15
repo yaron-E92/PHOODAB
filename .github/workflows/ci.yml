@@ -10,6 +10,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Centralized runtime versions for CI jobs.
+# Update these defaults when the stack support policy is formalized.
+env:
+  NODE_VERSION: '20'
+  DOTNET_VERSION: '10.0.x'
+
 jobs:
   changes:
     name: Detect project changes
@@ -91,7 +97,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          # Uses the workflow-level default; change env.NODE_VERSION above to upgrade globally.
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Install dependencies
         shell: bash
@@ -135,6 +142,9 @@ jobs:
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
+        with:
+          # Uses the workflow-level default; change env.DOTNET_VERSION above to upgrade globally.
+          dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Restore
         shell: bash
