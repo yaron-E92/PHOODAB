@@ -21,3 +21,5 @@ app.MapGet("/version", () =>
 .WithOpenApi();
 
 app.Run();
+
+public partial class Program { }
