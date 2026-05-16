@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import ReactDOM from 'react-dom/client';
-import { getHealth, getVersion } from '../../../packages/api-client/src/generated';
+import { getHealth, getVersion } from '../../../packages/api-client/src/client';
 
 function App() {
   const baseUrl = 'http://localhost:5199';
@@ -9,7 +9,7 @@ function App() {
 
   useEffect(() => {
     getHealth(baseUrl).then((r) => setHealth(r.status)).catch((e) => setHealth(String(e)));
-    getVersion(baseUrl).then((r) => setVersion(r.informationalVersion)).catch((e) => setVersion(String(e)));
+    getVersion(baseUrl).then((r) => setVersion(r.version)).catch((e) => setVersion(String(e)));
   }, []);
 
   return (
