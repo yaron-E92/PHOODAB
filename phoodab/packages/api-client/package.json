@@ -1,0 +1,12 @@
+{
+  "name": "@phoodab/api-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "openapi-typescript http://localhost:5199/swagger/v1/swagger.json --output src/generated.ts"
+  },
+  "devDependencies": {
+    "openapi-typescript": "^7.6.1"
+  }
+}
