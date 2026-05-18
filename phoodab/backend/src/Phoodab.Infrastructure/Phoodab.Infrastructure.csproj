@@ -8,4 +8,7 @@
     <ProjectReference Include="../Phoodab.Application/Phoodab.Application.csproj" />
     <ProjectReference Include="../Phoodab.Domain/Phoodab.Domain.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Yaref92.Events" Version="*" />
+  </ItemGroup>
 </Project>
