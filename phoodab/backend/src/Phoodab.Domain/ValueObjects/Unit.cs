@@ -1,5 +1,19 @@
 namespace Phoodab.Domain;
 
+public enum UnitEnum
+{
+    Piece,
+    Pack,
+    Box,
+    Kg,
+    G,
+    L,
+    Ml,
+    Bundle,
+    Roll,
+    Unknown
+}
+
 public readonly record struct Unit
 {
     public const string PieceValue = "Piece";
@@ -26,6 +40,20 @@ public readonly record struct Unit
 
     public string Value { get; }
 
+    public UnitEnum Kind => Value.ToLowerInvariant() switch
+    {
+        "piece" => UnitEnum.Piece,
+        "pack" => UnitEnum.Pack,
+        "box" => UnitEnum.Box,
+        "kg" => UnitEnum.Kg,
+        "g" => UnitEnum.G,
+        "l" => UnitEnum.L,
+        "ml" => UnitEnum.Ml,
+        "bundle" => UnitEnum.Bundle,
+        "roll" => UnitEnum.Roll,
+        _ => UnitEnum.Unknown
+    };
+
     public Unit(string value)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -35,6 +63,20 @@ public readonly record struct Unit
 
         Value = value.Trim();
     }
+
+    public static Unit From(UnitEnum unit) => unit switch
+    {
+        UnitEnum.Piece => Piece,
+        UnitEnum.Pack => Pack,
+        UnitEnum.Box => Box,
+        UnitEnum.Kg => Kg,
+        UnitEnum.G => G,
+        UnitEnum.L => L,
+        UnitEnum.Ml => Ml,
+        UnitEnum.Bundle => Bundle,
+        UnitEnum.Roll => Roll,
+        _ => Unknown
+    };
 
     public override string ToString() => Value;
 }

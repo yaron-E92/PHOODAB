@@ -17,6 +17,7 @@ public class ItemNameUnitParserTests
         {
             Assert.That(result.Name, Is.EqualTo(expectedName));
             Assert.That(result.Unit.Value, Is.EqualTo(expectedUnit));
+            Assert.That(result.Unit.Kind, Is.Not.EqualTo(UnitEnum.Unknown));
             Assert.That(result.Warnings, Is.Empty);
         });
     }
