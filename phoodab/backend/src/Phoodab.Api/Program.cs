@@ -1,7 +1,10 @@
+using Phoodab.Infrastructure.Eventing;
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+builder.Services.AddPhoodabEventing();
 
 var app = builder.Build();
 
