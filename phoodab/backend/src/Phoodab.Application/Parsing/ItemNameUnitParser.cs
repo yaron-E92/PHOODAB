@@ -4,71 +4,72 @@ namespace Phoodab.Application.Parsing;
 
 public static class ItemNameUnitParser
 {
-    private static readonly Dictionary<string, Unit[]> TokenMap = new(StringComparer.OrdinalIgnoreCase)
+    private const string UnknownUnitCode = "UnknownUnit";
+    private const string AmbiguousUnitCode = "AmbiguousUnit";
+    private const string EmptyInputMessage = "Input is empty.";
+    private const string MissingPatternMessage = "No supported trailing unit pattern found.";
+    private const string AmbiguousUnitMessageTemplate = "Ambiguous unit token '{0}'.";
+    private const string UnknownUnitMessageTemplate = "Unknown unit token '{0}'.";
+
+    private const char ParenthesisOpen = '(';
+    private const char ParenthesisClose = ')';
+    private const char BracketOpen = '[';
+    private const char BracketClose = ']';
+    private const char AmbiguousSlash = '/';
+    private const char AmbiguousPipe = '|';
+    private const char AmbiguousComma = ',';
+
+    private static readonly Dictionary<string, Unit> TokenMap = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["piece"] = [Unit.Piece],
-        ["pack"] = [Unit.Pack],
-        ["box"] = [Unit.Box],
-        ["kg"] = [Unit.Kg],
-        ["g"] = [Unit.G],
-        ["l"] = [Unit.L],
-        ["ml"] = [Unit.Ml],
-        ["bundle"] = [Unit.Bundle],
-        ["roll"] = [Unit.Roll],
-        ["pk"] = [Unit.Pack],
-        ["pcs"] = [Unit.Piece],
-        ["pc"] = [Unit.Piece],
-        ["gram"] = [Unit.G],
-        ["grams"] = [Unit.G],
-        ["liter"] = [Unit.L],
-        ["litre"] = [Unit.L],
-        ["liters"] = [Unit.L],
-        ["litres"] = [Unit.L]
+        ["piece"] = Unit.Piece,
+        ["pack"] = Unit.Pack,
+        ["box"] = Unit.Box,
+        ["kg"] = Unit.Kg,
+        ["g"] = Unit.G,
+        ["l"] = Unit.L,
+        ["ml"] = Unit.Ml,
+        ["bundle"] = Unit.Bundle,
+        ["roll"] = Unit.Roll,
+        ["pk"] = Unit.Pack,
+        ["pcs"] = Unit.Piece,
+        ["pc"] = Unit.Piece,
+        ["gram"] = Unit.G,
+        ["grams"] = Unit.G,
+        ["liter"] = Unit.L,
+        ["litre"] = Unit.L,
+        ["liters"] = Unit.L,
+        ["litres"] = Unit.L
     };
 
     public static ItemNameUnitParseResult Parse(string input)
     {
         if (string.IsNullOrWhiteSpace(input))
         {
-            return new ItemNameUnitParseResult(string.Empty, Unit.Unknown, [
-                new UnitParseWarning("UnknownUnit", "Input is empty.")
-            ]);
+            return new ItemNameUnitParseResult(string.Empty, Unit.Unknown, [new UnitParseWarning(UnknownUnitCode, EmptyInputMessage)]);
         }
 
         var trimmed = input.Trim();
-        var candidate = ExtractTrailingToken(trimmed, '(', ')') ?? ExtractTrailingToken(trimmed, '[', ']');
+        var candidate = ExtractTrailingToken(trimmed, ParenthesisOpen, ParenthesisClose)
+            ?? ExtractTrailingToken(trimmed, BracketOpen, BracketClose);
 
         if (candidate is null)
         {
-            return new ItemNameUnitParseResult(trimmed, Unit.Unknown, [
-                new UnitParseWarning("UnknownUnit", "No supported trailing unit pattern found.")
-            ]);
+            return new ItemNameUnitParseResult(trimmed, Unit.Unknown, [new UnitParseWarning(UnknownUnitCode, MissingPatternMessage)]);
         }
 
         var (name, token) = candidate.Value;
 
-        if (token.Contains('/') || token.Contains('|') || token.Contains(','))
+        if (token.Contains(AmbiguousSlash) || token.Contains(AmbiguousPipe) || token.Contains(AmbiguousComma))
         {
-            return new ItemNameUnitParseResult(name, Unit.Unknown, [
-                new UnitParseWarning("AmbiguousUnit", $"Ambiguous unit token '{token}'.")
-            ]);
+            return new ItemNameUnitParseResult(name, Unit.Unknown, [new UnitParseWarning(AmbiguousUnitCode, string.Format(AmbiguousUnitMessageTemplate, token))]);
         }
 
-        if (!TokenMap.TryGetValue(token.Trim(), out var units) || units.Length == 0)
+        if (!TokenMap.TryGetValue(token.Trim(), out var unit))
         {
-            return new ItemNameUnitParseResult(name, Unit.Unknown, [
-                new UnitParseWarning("UnknownUnit", $"Unknown unit token '{token}'.")
-            ]);
+            return new ItemNameUnitParseResult(name, Unit.Unknown, [new UnitParseWarning(UnknownUnitCode, string.Format(UnknownUnitMessageTemplate, token))]);
         }
 
-        if (units.Length > 1)
-        {
-            return new ItemNameUnitParseResult(name, Unit.Unknown, [
-                new UnitParseWarning("AmbiguousUnit", $"Ambiguous unit token '{token}'.")
-            ]);
-        }
-
-        return new ItemNameUnitParseResult(name, units[0], []);
+        return new ItemNameUnitParseResult(name, unit, []);
     }
 
     private static (string Name, string Token)? ExtractTrailingToken(string value, char open, char close)
