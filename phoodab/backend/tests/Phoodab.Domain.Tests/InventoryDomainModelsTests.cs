@@ -4,6 +4,37 @@ namespace Phoodab.Domain.Tests;
 
 public class InventoryDomainModelsTests
 {
+
+    [Test]
+    public void Inventory_entry_and_lot_can_hold_nullable_storage_slot()
+    {
+        var slotId = Guid.NewGuid();
+        var durable = new ItemDefinition(Guid.NewGuid(), "Vacuum", ItemKind.Durable);
+        var consumable = new ItemDefinition(Guid.NewGuid(), "Yogurt", ItemKind.Consumable);
+
+        var entryWithSlot = new InventoryEntry(Guid.NewGuid(), durable, slotId);
+        var entryWithoutSlot = new InventoryEntry(Guid.NewGuid(), durable);
+        var lotWithSlot = new InventoryLot(Guid.NewGuid(), consumable.Id, Quantity.From(1), new Unit("cup"), DateOnly.FromDateTime(DateTime.UtcNow), slotId);
+        var lotWithoutSlot = new InventoryLot(Guid.NewGuid(), consumable.Id, Quantity.From(1), new Unit("cup"), null);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(entryWithSlot.StorageSlotId, Is.EqualTo(slotId));
+            Assert.That(entryWithoutSlot.StorageSlotId, Is.Null);
+            Assert.That(lotWithSlot.StorageSlotId, Is.EqualTo(slotId));
+            Assert.That(lotWithoutSlot.StorageSlotId, Is.Null);
+        });
+    }
+
+    [Test]
+    public void Empty_storage_slot_id_is_rejected_when_provided()
+    {
+        var durable = new ItemDefinition(Guid.NewGuid(), "Mop", ItemKind.Durable);
+        var consumable = new ItemDefinition(Guid.NewGuid(), "Beans", ItemKind.Consumable);
+
+        Assert.Throws<ArgumentException>(() => new InventoryEntry(Guid.NewGuid(), durable, Guid.Empty));
+        Assert.Throws<ArgumentException>(() => new InventoryLot(Guid.NewGuid(), consumable.Id, Quantity.From(1), new Unit("kg"), null, Guid.Empty));
+    }
     [Test]
     public void Durable_item_cannot_accept_lots()
     {
