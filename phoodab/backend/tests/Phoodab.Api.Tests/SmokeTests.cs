@@ -37,4 +37,16 @@ public class SmokeTests
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
     }
+
+    [Test]
+    public async Task Replenishment_Suggestions_Endpoint_Returns_Ok_With_Required_Amount_And_Unit()
+    {
+        var response = await _client.GetAsync("/replenishment/suggestions");
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+
+        var content = await response.Content.ReadAsStringAsync();
+        Assert.That(content, Does.Contain("requiredAmount"));
+        Assert.That(content, Does.Contain("unit"));
+    }
 }
