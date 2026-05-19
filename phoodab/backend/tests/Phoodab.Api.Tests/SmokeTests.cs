@@ -39,13 +39,18 @@ public class SmokeTests
     }
 
     [Test]
-    public async Task Replenishment_Suggestions_Endpoint_Returns_Ok_With_Array_Response()
+    public async Task Replenishment_Suggestions_Endpoint_Returns_Ok_With_Required_Amount_And_Unit()
     {
         var response = await _client.GetAsync("/replenishment/suggestions");
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
 
         var content = await response.Content.ReadAsStringAsync();
-        Assert.That(content.TrimStart(), Does.StartWith("["));
+        Assert.That(content, Does.Contain("\"itemName\":\"Milk\""));
+        Assert.That(content, Does.Contain("\"requiredAmount\":1"));
+        Assert.That(content, Does.Contain("\"itemName\":\"Beans\""));
+        Assert.That(content, Does.Contain("\"requiredAmount\":0"));
+        Assert.That(content, Does.Contain("\"unit\":\"liter\""));
+        Assert.That(content, Does.Not.Contain("Rice"));
     }
 }
