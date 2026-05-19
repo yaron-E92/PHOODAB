@@ -7,8 +7,17 @@ public sealed class ReplenishmentRule
     public Quantity TargetAmount { get; }
     public Unit Unit { get; }
     public int ExpiryWarningDays { get; }
+    public bool IsHidden { get; }
+    public bool IsDisabled { get; }
 
-    public ReplenishmentRule(Guid id, Guid itemDefinitionId, Quantity targetAmount, Unit unit, int expiryWarningDays = 0)
+    public ReplenishmentRule(
+        Guid id,
+        Guid itemDefinitionId,
+        Quantity targetAmount,
+        Unit unit,
+        int expiryWarningDays = 0,
+        bool isHidden = false,
+        bool isDisabled = false)
     {
         if (id == Guid.Empty)
         {
@@ -30,6 +39,8 @@ public sealed class ReplenishmentRule
         TargetAmount = targetAmount;
         Unit = unit;
         ExpiryWarningDays = expiryWarningDays;
+        IsHidden = isHidden;
+        IsDisabled = isDisabled;
     }
 
     public Quantity GetRequiredAmount(Quantity currentAmount)
