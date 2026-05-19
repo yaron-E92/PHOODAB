@@ -1,3 +1,5 @@
+using Phoodab.Application;
+using Phoodab.Domain;
 using Phoodab.Infrastructure.Eventing;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -21,6 +23,16 @@ app.MapGet("/version", () =>
     return Results.Ok(new { version });
 })
 .WithName("GetVersion")
+.WithOpenApi();
+
+var suggestionService = new ReplenishmentSuggestionService();
+
+app.MapGet("/replenishment/suggestions", () =>
+{
+    var suggestions = suggestionService.GetSuggestions(Array.Empty<ReplenishmentRule>(), Array.Empty<InventoryEntry>());
+    return Results.Ok(suggestions);
+})
+.WithName("GetReplenishmentSuggestions")
 .WithOpenApi();
 
 app.Run();
