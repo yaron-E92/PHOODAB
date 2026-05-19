@@ -1,3 +1,4 @@
+using Phoodab.Application;
 using Phoodab.Infrastructure.Eventing;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -21,6 +22,17 @@ app.MapGet("/version", () =>
     return Results.Ok(new { version });
 })
 .WithName("GetVersion")
+.WithOpenApi();
+
+builder.Services.AddSingleton<ReplenishmentSuggestionService>();
+builder.Services.AddSingleton<IReplenishmentReadData, InMemoryReplenishmentReadData>();
+
+app.MapGet("/replenishment/suggestions", (ReplenishmentSuggestionService suggestionService, IReplenishmentReadData readData) =>
+{
+    var suggestions = suggestionService.GetSuggestions(readData.GetRules(), readData.GetInventoryEntries());
+    return Results.Ok(suggestions);
+})
+.WithName("GetReplenishmentSuggestions")
 .WithOpenApi();
 
 app.Run();
