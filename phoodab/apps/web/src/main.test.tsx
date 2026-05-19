@@ -1,10 +1,34 @@
-import { describe, it, expect } from 'vitest';
-import { renderToStaticMarkup } from 'react-dom/server';
-import { ReplenishmentSuggestionsList } from './main';
+import React from 'react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { act } from 'react-dom/test-utils';
+import { createRoot } from 'react-dom/client';
+
+const getHealthMock = vi.fn().mockResolvedValue({ status: 'ok' });
+const getVersionMock = vi.fn().mockResolvedValue({ version: 'test' });
+const getReplenishmentSuggestionsMock = vi.fn();
+
+vi.mock('../../../packages/api-client/src/client', () => ({
+  getHealth: getHealthMock,
+  getVersion: getVersionMock,
+  getReplenishmentSuggestions: getReplenishmentSuggestionsMock
+}));
+
+vi.mock('react-dom/client', async () => {
+  const actual = await vi.importActual<typeof import('react-dom/client')>('react-dom/client');
+  return {
+    ...actual,
+    createRoot: vi.fn(() => ({ render: vi.fn() }))
+  };
+});
 
 describe('replenishment rendering contract', () => {
-  it('renders backend-provided requiredAmount and unit without frontend recalculation', () => {
-    const apiPayload = [
+  beforeEach(() => {
+    vi.clearAllMocks();
+    document.body.innerHTML = '<div id="root"></div>';
+  });
+
+  it('renders requiredAmount from API payload flow without frontend recalculation', async () => {
+    getReplenishmentSuggestionsMock.mockResolvedValue([
       {
         itemDefinitionId: 'item-1',
         itemName: 'Milk',
@@ -13,11 +37,22 @@ describe('replenishment rendering contract', () => {
         currentQuantity: 9,
         unit: 'liter'
       }
-    ];
+    ]);
 
-    const html = renderToStaticMarkup(<ReplenishmentSuggestionsList suggestions={apiPayload} />);
+    const { App } = await import('./main');
 
-    expect(html).toContain('Milk: 4 liter');
-    expect(html).not.toContain('Milk: 1 liter');
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<App />);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(getReplenishmentSuggestionsMock).toHaveBeenCalledWith('http://localhost:5199');
+    expect(container.textContent).toContain('Milk: 4 liter');
+    expect(container.textContent).not.toContain('Milk: 1 liter');
   });
 });
