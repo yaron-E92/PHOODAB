@@ -2,7 +2,19 @@ import React, { useEffect, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import { getHealth, getReplenishmentSuggestions, getVersion, type ReplenishmentSuggestion } from '../../../packages/api-client/src/client';
 
-function App() {
+export function ReplenishmentSuggestionsList({ suggestions }: { suggestions: ReplenishmentSuggestion[] }) {
+  return (
+    <ul>
+      {suggestions.map((suggestion) => (
+        <li key={suggestion.itemDefinitionId}>
+          {suggestion.itemName}: {suggestion.requiredAmount} {suggestion.unit}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+export function App() {
   const baseUrl = 'http://localhost:5199';
   const [health, setHealth] = useState<string>('loading');
   const [version, setVersion] = useState<string>('loading');
@@ -15,20 +27,18 @@ function App() {
   }, []);
 
   return (
-    <main>
+    <main style={{ fontFamily: 'system-ui', padding: 16 }}>
       <h1>PHOODAB Web Shell</h1>
       <p>Health: {health}</p>
       <p>Version: {version}</p>
       <h2>Replenishment Suggestions</h2>
-      <ul>
-        {suggestions.map((suggestion) => (
-          <li key={suggestion.itemDefinitionId}>
-            {suggestion.itemName}: {suggestion.requiredAmount} {suggestion.unit}
-          </li>
-        ))}
-      </ul>
+      <ReplenishmentSuggestionsList suggestions={suggestions} />
     </main>
   );
 }
 
-ReactDOM.createRoot(document.getElementById('root')!).render(<App />);
+ReactDOM.createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
