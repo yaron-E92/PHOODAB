@@ -56,4 +56,15 @@ public class ReplenishmentSuggestionServiceTests
 
         Assert.That(suggestions, Is.Empty);
     }
+
+    [Test]
+    public void Required_amount_formula_uses_max_zero_of_desired_minus_current()
+    {
+        var rule = new ReplenishmentRule(Guid.NewGuid(), Guid.NewGuid(), Quantity.From(5), new Unit("liter"));
+
+        Assert.That(rule.GetRequiredAmount(Quantity.From(2)).Value, Is.EqualTo(3));
+        Assert.That(rule.GetRequiredAmount(Quantity.From(5)).Value, Is.EqualTo(0));
+        Assert.That(rule.GetRequiredAmount(Quantity.From(7)).Value, Is.EqualTo(0));
+    }
+
 }
