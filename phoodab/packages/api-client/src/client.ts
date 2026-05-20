@@ -10,6 +10,14 @@ export type ReplenishmentSuggestion = {
   desiredQuantity: number;
   requiredAmount: number;
   unit: string;
+  lots: {
+    lotId: string;
+    quantity: number;
+    unit: string;
+    expiresOn: string | null;
+    expiresInDays: number | null;
+    expiryStatus: 'Unknown' | 'Expired' | 'Urgent' | 'Soon' | 'Safe';
+  }[];
 };
 
 export async function getHealth(baseUrl: string): Promise<HealthResponse> {
