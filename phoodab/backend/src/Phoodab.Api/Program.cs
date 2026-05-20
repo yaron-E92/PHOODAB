@@ -24,6 +24,8 @@ app.MapGet("/version", () =>
 .WithName("GetVersion")
 .WithOpenApi();
 
+builder.Services.AddSingleton<IUtcDateProvider, SystemUtcDateProvider>();
+builder.Services.AddSingleton<InventoryLotExpiryCalculator>();
 builder.Services.AddSingleton<ReplenishmentSuggestionService>();
 builder.Services.AddSingleton<IReplenishmentReadData, InMemoryReplenishmentReadData>();
 
