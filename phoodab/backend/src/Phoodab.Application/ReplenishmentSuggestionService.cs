@@ -2,20 +2,24 @@ using Phoodab.Domain;
 
 namespace Phoodab.Application;
 
-public sealed record ReplenishmentSuggestionReadModel(
-    Guid ItemDefinitionId,
-    string ItemName,
-    decimal CurrentQuantity,
-    decimal DesiredQuantity,
-    decimal RequiredAmount,
-    string Unit);
-
 public sealed class ReplenishmentSuggestionService
 {
+    private readonly IUtcDateProvider _utcDateProvider;
+    private readonly InventoryLotExpiryCalculator _inventoryLotExpiryCalculator;
+
+    public ReplenishmentSuggestionService(
+        IUtcDateProvider utcDateProvider,
+        InventoryLotExpiryCalculator inventoryLotExpiryCalculator)
+    {
+        _utcDateProvider = utcDateProvider;
+        _inventoryLotExpiryCalculator = inventoryLotExpiryCalculator;
+    }
+
     public IReadOnlyList<ReplenishmentSuggestionReadModel> GetSuggestions(
         IEnumerable<ReplenishmentRule> rules,
         IEnumerable<InventoryEntry> inventoryEntries)
     {
+        var todayUtc = _utcDateProvider.TodayUtc;
         var entriesByItem = inventoryEntries.ToDictionary(e => e.ItemDefinitionId);
         var results = new List<ReplenishmentSuggestionReadModel>();
 
@@ -34,13 +38,15 @@ public sealed class ReplenishmentSuggestionService
             }
 
             var requiredAmount = Math.Max(0, rule.TargetAmount.Value - currentAndValid.currentAmount);
+            var lots = entry?.Lots.Select(lot => _inventoryLotExpiryCalculator.ToReadModel(lot, todayUtc)).ToList() ?? new List<InventoryLotReadModel>();
             results.Add(new ReplenishmentSuggestionReadModel(
                 rule.ItemDefinitionId,
                 entry?.ItemDefinition.Name ?? "Unknown Item",
                 currentAndValid.currentAmount,
                 rule.TargetAmount.Value,
                 requiredAmount,
-                rule.Unit.Symbol));
+                rule.Unit.Symbol,
+                lots));
         }
 
         return results;
@@ -60,4 +66,5 @@ public sealed class ReplenishmentSuggestionService
 
         return (entry.Lots.Sum(lot => lot.Quantity.Value), true);
     }
+
 }

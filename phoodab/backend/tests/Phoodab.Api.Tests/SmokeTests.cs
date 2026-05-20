@@ -60,6 +60,9 @@ public class SmokeTests
         Assert.That(milk.GetProperty("desiredQuantity").GetDecimal(), Is.EqualTo(2));
         Assert.That(milk.GetProperty("requiredAmount").GetDecimal(), Is.EqualTo(1));
         Assert.That(milk.GetProperty("unit").GetString(), Is.EqualTo("liter"));
+        Assert.That(milk.GetProperty("lots").ValueKind, Is.EqualTo(JsonValueKind.Array));
+        var milkLot = milk.GetProperty("lots")[0];
+        Assert.That(milkLot.GetProperty("expiryStatus").GetString(), Is.EqualTo("Unknown"));
 
         var beans = suggestions.Single(s => s.GetProperty("itemName").GetString() == "Beans");
         Assert.That(beans.GetProperty("itemDefinitionId").GetString(), Is.Not.Null.And.Not.Empty);
@@ -67,5 +70,6 @@ public class SmokeTests
         Assert.That(beans.GetProperty("desiredQuantity").GetDecimal(), Is.EqualTo(2));
         Assert.That(beans.GetProperty("requiredAmount").GetDecimal(), Is.EqualTo(0));
         Assert.That(beans.GetProperty("unit").GetString(), Is.EqualTo("can"));
+        Assert.That(beans.GetProperty("lots")[0].GetProperty("expiryStatus").GetString(), Is.EqualTo("Unknown"));
     }
 }
