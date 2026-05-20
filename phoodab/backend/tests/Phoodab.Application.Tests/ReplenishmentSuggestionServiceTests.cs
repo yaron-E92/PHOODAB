@@ -116,7 +116,7 @@ public class ReplenishmentSuggestionServiceTests
     }
 
     private static ReplenishmentSuggestionService CreateService(DateOnly? today = null)
-        => new(new FakeUtcDateProvider(today ?? Today));
+        => new(new FakeUtcDateProvider(today ?? Today), new InventoryLotExpiryCalculator());
 
     private sealed class FakeUtcDateProvider(DateOnly today) : IUtcDateProvider
     {

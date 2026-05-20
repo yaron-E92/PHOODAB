@@ -2,40 +2,17 @@ using Phoodab.Domain;
 
 namespace Phoodab.Application;
 
-public sealed record ReplenishmentSuggestionReadModel(
-    Guid ItemDefinitionId,
-    string ItemName,
-    decimal CurrentQuantity,
-    decimal DesiredQuantity,
-    decimal RequiredAmount,
-    string Unit,
-    IReadOnlyList<InventoryLotReadModel> Lots);
-
-public sealed record InventoryLotReadModel(
-    Guid LotId,
-    decimal Quantity,
-    string Unit,
-    DateOnly? ExpiresOn,
-    int? ExpiresInDays,
-    string ExpiryStatus);
-
-public interface IUtcDateProvider
-{
-    DateOnly TodayUtc { get; }
-}
-
-public sealed class SystemUtcDateProvider : IUtcDateProvider
-{
-    public DateOnly TodayUtc => DateOnly.FromDateTime(DateTime.UtcNow);
-}
-
 public sealed class ReplenishmentSuggestionService
 {
     private readonly IUtcDateProvider _utcDateProvider;
+    private readonly InventoryLotExpiryCalculator _inventoryLotExpiryCalculator;
 
-    public ReplenishmentSuggestionService(IUtcDateProvider utcDateProvider)
+    public ReplenishmentSuggestionService(
+        IUtcDateProvider utcDateProvider,
+        InventoryLotExpiryCalculator inventoryLotExpiryCalculator)
     {
         _utcDateProvider = utcDateProvider;
+        _inventoryLotExpiryCalculator = inventoryLotExpiryCalculator;
     }
 
     public IReadOnlyList<ReplenishmentSuggestionReadModel> GetSuggestions(
@@ -61,7 +38,7 @@ public sealed class ReplenishmentSuggestionService
             }
 
             var requiredAmount = Math.Max(0, rule.TargetAmount.Value - currentAndValid.currentAmount);
-            var lots = entry?.Lots.Select(lot => ToLotReadModel(lot, todayUtc)).ToList() ?? new List<InventoryLotReadModel>();
+            var lots = entry?.Lots.Select(lot => _inventoryLotExpiryCalculator.ToReadModel(lot, todayUtc)).ToList() ?? new List<InventoryLotReadModel>();
             results.Add(new ReplenishmentSuggestionReadModel(
                 rule.ItemDefinitionId,
                 entry?.ItemDefinition.Name ?? "Unknown Item",
@@ -90,24 +67,4 @@ public sealed class ReplenishmentSuggestionService
         return (entry.Lots.Sum(lot => lot.Quantity.Value), true);
     }
 
-    private static InventoryLotReadModel ToLotReadModel(InventoryLot lot, DateOnly todayUtc)
-    {
-        var expiresInDays = lot.ExpiresOn is null ? null : lot.ExpiresOn.Value.DayNumber - todayUtc.DayNumber;
-        return new InventoryLotReadModel(
-            lot.Id,
-            lot.Quantity.Value,
-            lot.Unit.Symbol,
-            lot.ExpiresOn,
-            expiresInDays,
-            GetExpiryStatus(expiresInDays));
-    }
-
-    private static string GetExpiryStatus(int? expiresInDays)
-    {
-        if (expiresInDays is null) return "Unknown";
-        if (expiresInDays < 0) return "Expired";
-        if (expiresInDays <= 2) return "Urgent";
-        if (expiresInDays <= 7) return "Soon";
-        return "Safe";
-    }
 }
