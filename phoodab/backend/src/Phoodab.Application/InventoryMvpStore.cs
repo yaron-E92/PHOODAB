@@ -6,6 +6,7 @@ public sealed class InventoryMvpStore
 {
     private readonly List<ItemDefinition> _itemDefinitions = [];
     private readonly List<InventoryEntry> _inventoryEntries = [];
+    private readonly List<InventoryLot> _inventoryLots = [];
     private readonly List<ReplenishmentRule> _rules = [];
 
     public ItemDefinition CreateItemDefinition(string name, ItemKind kind)
@@ -28,8 +29,7 @@ public sealed class InventoryMvpStore
 
         if (_rules.All(r => r.ItemDefinitionId != itemDefinitionId))
         {
-            var unit = entry.Lots.FirstOrDefault()?.Unit ?? new Unit("unit");
-            _rules.Add(new ReplenishmentRule(Guid.NewGuid(), itemDefinitionId, Quantity.From(2), unit));
+            _rules.Add(new ReplenishmentRule(Guid.NewGuid(), itemDefinitionId, Quantity.From(2), new Unit("unit")));
         }
 
         return entry;
@@ -44,7 +44,7 @@ public sealed class InventoryMvpStore
         }
 
         var lot = new InventoryLot(Guid.NewGuid(), entry.ItemDefinitionId, Quantity.From(quantity), new Unit(unit), expiresOn, storageSlotId);
-        entry.AddLot(lot);
+        _inventoryLots.Add(lot);
 
         var existingRule = _rules.SingleOrDefault(r => r.ItemDefinitionId == entry.ItemDefinitionId);
         if (existingRule is not null && string.Equals(existingRule.Unit.Symbol, "unit", StringComparison.OrdinalIgnoreCase))
@@ -58,26 +58,42 @@ public sealed class InventoryMvpStore
 
     public IReadOnlyList<object> GetSummary()
     {
-        return _inventoryEntries.Select(e => new
+        return _inventoryEntries.Select(e =>
         {
-            inventoryEntryId = e.Id,
-            itemDefinitionId = e.ItemDefinitionId,
-            itemName = e.ItemDefinition.Name,
-            totalQuantity = e.Lots.Sum(l => l.Quantity.Value),
-            unit = e.Lots.FirstOrDefault()?.Unit.Symbol,
-            lotCount = e.Lots.Count
-        } as object).ToList();
+            var lots = _inventoryLots.Where(l => l.ItemDefinitionId == e.ItemDefinitionId).ToList();
+            return new
+            {
+                inventoryEntryId = e.Id,
+                itemDefinitionId = e.ItemDefinitionId,
+                itemName = e.ItemDefinition.Name,
+                totalQuantity = lots.Sum(l => l.Quantity.Value),
+                unit = lots.FirstOrDefault()?.Unit.Symbol,
+                lotCount = lots.Count
+            } as object;
+        }).ToList();
     }
 
     public IReadOnlyList<InventoryLotReadModel> GetExpiringLots(DateOnly todayUtc, InventoryLotExpiryCalculator expiryCalculator)
     {
-        return _inventoryEntries
-            .SelectMany(e => e.Lots)
+        return _inventoryLots
             .Select(lot => expiryCalculator.ToReadModel(lot, todayUtc))
             .Where(lot => lot.ExpiryStatus is "Expired" or "Urgent" or "Soon")
             .ToList();
     }
 
     public IReadOnlyList<ReplenishmentRule> GetRules() => _rules;
-    public IReadOnlyList<InventoryEntry> GetInventoryEntries() => _inventoryEntries;
+
+    public IReadOnlyList<InventoryEntry> GetInventoryEntries()
+    {
+        return _inventoryEntries.Select(e =>
+        {
+            var projected = new InventoryEntry(e.Id, e.ItemDefinition, e.StorageSlotId);
+            foreach (var lot in _inventoryLots.Where(l => l.ItemDefinitionId == e.ItemDefinitionId))
+            {
+                projected.AddLot(lot);
+            }
+
+            return projected;
+        }).ToList();
+    }
 }
