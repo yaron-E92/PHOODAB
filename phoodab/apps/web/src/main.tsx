@@ -10,7 +10,8 @@ import {
   getVersion,
   type ExpiringLot,
   type InventorySummaryItem,
-  type ReplenishmentSuggestion
+  type ReplenishmentSuggestion,
+  type ItemDefinition
 } from '../../../packages/api-client/src/client';
 
 const baseUrl = 'http://localhost:5199';
@@ -28,6 +29,30 @@ export function App() {
   const [summary, setSummary] = useState<InventorySummaryItem[]>([]);
   const [expiringLots, setExpiringLots] = useState<ExpiringLot[]>([]);
   const [suggestions, setSuggestions] = useState<ReplenishmentSuggestion[]>([]);
+  const [createdItems, setCreatedItems] = useState<ItemDefinition[]>([]);
+
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadData = async () => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const [summaryData, expiringData, suggestionData] = await Promise.all([
+        getInventorySummary(baseUrl),
+        getExpiringLots(baseUrl),
+        getReplenishmentSuggestions(baseUrl)
+      ]);
+      setSummary(summaryData);
+      setExpiringLots(expiringData);
+      setSuggestions(suggestionData);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -64,6 +89,7 @@ export function App() {
 
     try {
       const created = await createConsumableItem(baseUrl, itemName.trim());
+      setCreatedItems((current) => [created, ...current.filter((item) => item.id !== created.id)]);
       setItemName('');
       setLotItemDefinitionId(created.id);
       await loadData();
@@ -109,11 +135,18 @@ export function App() {
       <form onSubmit={onAddLot}>
         <select value={lotItemDefinitionId} onChange={(e) => setLotItemDefinitionId(e.target.value)}>
           <option value="">Select item</option>
-          {summary.map((item) => (
-            <option key={item.itemDefinitionId} value={item.itemDefinitionId}>
-              {item.itemName}
+          {createdItems.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.name}
             </option>
           ))}
+          {summary
+            .filter((item) => !createdItems.some((createdItem) => createdItem.id === item.itemDefinitionId))
+            .map((item) => (
+              <option key={item.itemDefinitionId} value={item.itemDefinitionId}>
+                {item.itemName}
+              </option>
+            ))}
         </select>
         <input placeholder="Quantity" type="number" step="any" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
         <input placeholder="Unit" value={unit} onChange={(e) => setUnit(e.target.value)} />
