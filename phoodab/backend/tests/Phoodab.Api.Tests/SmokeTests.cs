@@ -85,6 +85,7 @@ public class SmokeTests
         Assert.That(lotResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
 
         var lot = JsonSerializer.Deserialize<JsonElement>(await lotResponse.Content.ReadAsStringAsync());
+        var lotId = lot.GetProperty("id").GetGuid();
         Assert.That(lot.GetProperty("quantity").GetProperty("value").GetDecimal(), Is.EqualTo(1m));
         Assert.That(lot.GetProperty("expiresOn").GetDateTime().Date, Is.EqualTo(expiredDate.ToDateTime(TimeOnly.MinValue).Date));
 
@@ -94,7 +95,7 @@ public class SmokeTests
 
         var expiringLots = JsonSerializer.Deserialize<JsonElement>(await (await _client.GetAsync("/api/inventory/expiring")).Content.ReadAsStringAsync())
             .EnumerateArray().ToList();
-        var expiringLot = expiringLots.Single(x => x.GetProperty("itemDefinitionId").GetGuid() == itemId);
+        var expiringLot = expiringLots.Single(x => x.GetProperty("lotId").GetGuid() == lotId);
         Assert.That(expiringLot.GetProperty("expiresInDays").GetInt32(), Is.LessThan(0));
         Assert.That(expiringLot.GetProperty("expiryStatus").GetString(), Is.EqualTo("Expired"));
     }
