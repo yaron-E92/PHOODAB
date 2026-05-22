@@ -3,6 +3,36 @@ import type { paths } from './generated';
 type HealthResponse = paths['/health']['get']['responses']['200']['content']['application/json'];
 type VersionResponse = paths['/version']['get']['responses']['200']['content']['application/json'];
 
+export type ItemDefinition = {
+  id: string;
+  name: string;
+  kind: string;
+};
+
+export type InventoryEntry = {
+  id: string;
+  itemDefinitionId: string;
+  storageSlotId: string | null;
+};
+
+export type InventorySummaryItem = {
+  inventoryEntryId: string;
+  itemDefinitionId: string;
+  itemName: string;
+  totalQuantity: number;
+  unit: string | null;
+  lotCount: number;
+};
+
+export type ExpiringLot = {
+  lotId: string;
+  quantity: number;
+  unit: string;
+  expiresOn: string | null;
+  expiresInDays: number | null;
+  expiryStatus: 'Unknown' | 'Expired' | 'Urgent' | 'Soon' | 'Safe';
+};
+
 export type ReplenishmentSuggestion = {
   itemDefinitionId: string;
   itemName: string;
@@ -32,8 +62,71 @@ export async function getVersion(baseUrl: string): Promise<VersionResponse> {
   return response.json();
 }
 
+export async function createConsumableItem(baseUrl: string, name: string): Promise<ItemDefinition> {
+  const response = await fetch(`${baseUrl}/api/item-definitions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, kind: 'Consumable' })
+  });
+
+  if (!response.ok) throw new Error(`Create item failed: ${response.status}`);
+
+  return response.json();
+}
+
+export async function createInventoryEntry(baseUrl: string, itemDefinitionId: string, storageSlotId: string | null): Promise<InventoryEntry> {
+  const response = await fetch(`${baseUrl}/api/inventory-entries`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ itemDefinitionId, storageSlotId })
+  });
+
+  if (!response.ok) throw new Error(`Create entry failed: ${response.status}`);
+
+  return response.json();
+}
+
+export async function addInventoryLot(
+  baseUrl: string,
+  payload: {
+    itemDefinitionId: string;
+    quantity: number;
+    unit: string;
+    expiresOn: string | null;
+    storageSlotId: string | null;
+  }
+): Promise<void> {
+  const entry = await createInventoryEntry(baseUrl, payload.itemDefinitionId, payload.storageSlotId);
+
+  const response = await fetch(`${baseUrl}/api/inventory-lots`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      inventoryEntryId: entry.id,
+      quantity: payload.quantity,
+      unit: payload.unit,
+      expiresOn: payload.expiresOn,
+      storageSlotId: payload.storageSlotId
+    })
+  });
+
+  if (!response.ok) throw new Error(`Add lot failed: ${response.status}`);
+}
+
+export async function getInventorySummary(baseUrl: string): Promise<InventorySummaryItem[]> {
+  const response = await fetch(`${baseUrl}/api/inventory/summary`);
+  if (!response.ok) throw new Error(`Inventory summary failed: ${response.status}`);
+  return response.json();
+}
+
+export async function getExpiringLots(baseUrl: string): Promise<ExpiringLot[]> {
+  const response = await fetch(`${baseUrl}/api/inventory/expiring`);
+  if (!response.ok) throw new Error(`Expiring lots failed: ${response.status}`);
+  return response.json();
+}
+
 export async function getReplenishmentSuggestions(baseUrl: string): Promise<ReplenishmentSuggestion[]> {
-  const response = await fetch(`${baseUrl}/replenishment/suggestions`);
+  const response = await fetch(`${baseUrl}/api/replenishment/suggestions`);
   if (!response.ok) throw new Error(`Suggestions failed: ${response.status}`);
   return response.json();
 }
