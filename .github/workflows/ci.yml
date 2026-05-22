@@ -161,28 +161,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if git ls-files | rg -q '(\.sln$|\.csproj$|\.fsproj$)'; then
-            dotnet restore
-          else
-            echo "No .NET solution/project files found; skipping."
-          fi
+          dotnet restore phoodab/backend/*.sln
 
       - name: Build
         shell: bash
         run: |
           set -euo pipefail
-          if git ls-files | rg -q '(\.sln$|\.csproj$|\.fsproj$)'; then
-            dotnet build --no-restore
-          else
-            echo "No .NET solution/project files found; skipping."
-          fi
+          dotnet build --no-restore phoodab/backend/*.sln
 
       - name: Test
         shell: bash
         run: |
           set -euo pipefail
-          if git ls-files | rg -q '(\.sln$|\.csproj$|\.fsproj$)'; then
-            dotnet test --no-build
-          else
-            echo "No .NET solution/project files found; skipping."
-          fi
+          dotnet test --no-build phoodab/backend/*.sln

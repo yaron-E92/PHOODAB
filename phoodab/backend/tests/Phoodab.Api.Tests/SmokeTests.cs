@@ -1,17 +1,36 @@
+using System;
+using System.IO;
+using System.Linq;
 using System.Net;
+using System.Net.Http;
+using System.Net.Http.Json;
 using System.Text.Json;
+using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc.Testing;
+using NUnit.Framework;
+using Phoodab.Domain;
 
 namespace Phoodab.Api.Tests;
 
 public class SmokeTests
 {
+    private static void ResetStoreFile()
+    {
+        var basePath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var filePath = Path.Combine(basePath, "phoodab", "inventory-mvp-store.json");
+        if (File.Exists(filePath))
+        {
+            File.Delete(filePath);
+        }
+    }
+
     private WebApplicationFactory<Program> _factory = null!;
     private HttpClient _client = null!;
 
     [SetUp]
     public void SetUp()
     {
+        ResetStoreFile();
         _factory = new WebApplicationFactory<Program>();
         _client = _factory.CreateClient();
     }
@@ -40,36 +59,83 @@ public class SmokeTests
     }
 
     [Test]
-    public async Task Replenishment_Suggestions_Endpoint_Returns_Ok_With_Expected_Shape_And_Values()
+    public async Task OpenApi_Contains_Mvp_Inventory_Endpoints()
     {
-        var response = await _client.GetAsync("/replenishment/suggestions");
-
+        var response = await _client.GetAsync("/swagger/v1/swagger.json");
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
 
-        var content = await response.Content.ReadAsStringAsync();
-        var json = JsonSerializer.Deserialize<JsonElement>(content);
+        var swagger = JsonSerializer.Deserialize<JsonElement>(await response.Content.ReadAsStringAsync());
+        var paths = swagger.GetProperty("paths");
 
-        Assert.That(json.ValueKind, Is.EqualTo(JsonValueKind.Array));
+        Assert.That(paths.TryGetProperty("/api/item-definitions", out _), Is.True);
+        Assert.That(paths.TryGetProperty("/api/inventory-entries", out _), Is.True);
+        Assert.That(paths.TryGetProperty("/api/inventory-lots", out _), Is.True);
+        Assert.That(paths.TryGetProperty("/api/inventory/summary", out _), Is.True);
+        Assert.That(paths.TryGetProperty("/api/inventory/expiring", out _), Is.True);
+        Assert.That(paths.TryGetProperty("/api/replenishment/suggestions", out _), Is.True);
+    }
 
-        var suggestions = json.EnumerateArray().ToList();
-        Assert.That(suggestions.Count, Is.EqualTo(2));
+    [Test]
+    public async Task Add_lot_with_quantity_and_expiry_date_is_reflected_in_summary_and_expiring_views()
+    {
+        var (_, entryId) = await CreateItemAndEntry("Milk");
 
-        var milk = suggestions.Single(s => s.GetProperty("itemName").GetString() == "Milk");
-        Assert.That(milk.GetProperty("itemDefinitionId").GetString(), Is.Not.Null.And.Not.Empty);
-        Assert.That(milk.GetProperty("currentQuantity").GetDecimal(), Is.EqualTo(1));
-        Assert.That(milk.GetProperty("desiredQuantity").GetDecimal(), Is.EqualTo(2));
-        Assert.That(milk.GetProperty("requiredAmount").GetDecimal(), Is.EqualTo(1));
-        Assert.That(milk.GetProperty("unit").GetString(), Is.EqualTo("liter"));
-        Assert.That(milk.GetProperty("lots").ValueKind, Is.EqualTo(JsonValueKind.Array));
-        var milkLot = milk.GetProperty("lots")[0];
-        Assert.That(milkLot.GetProperty("expiryStatus").GetString(), Is.EqualTo("Unknown"));
+        var expiredDate = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(-1));
+        var lotResponse = await _client.PostAsJsonAsync("/api/inventory-lots", new { inventoryEntryId = entryId, quantity = 1m, unit = "liter", expiresOn = expiredDate, storageSlotId = (Guid?)null });
+        Assert.That(lotResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
 
-        var beans = suggestions.Single(s => s.GetProperty("itemName").GetString() == "Beans");
-        Assert.That(beans.GetProperty("itemDefinitionId").GetString(), Is.Not.Null.And.Not.Empty);
-        Assert.That(beans.GetProperty("currentQuantity").GetDecimal(), Is.EqualTo(2));
-        Assert.That(beans.GetProperty("desiredQuantity").GetDecimal(), Is.EqualTo(2));
-        Assert.That(beans.GetProperty("requiredAmount").GetDecimal(), Is.EqualTo(0));
-        Assert.That(beans.GetProperty("unit").GetString(), Is.EqualTo("can"));
-        Assert.That(beans.GetProperty("lots")[0].GetProperty("expiryStatus").GetString(), Is.EqualTo("Unknown"));
+        var lot = JsonSerializer.Deserialize<JsonElement>(await lotResponse.Content.ReadAsStringAsync());
+        Assert.That(lot.GetProperty("quantity").GetProperty("value").GetDecimal(), Is.EqualTo(1m));
+        Assert.That(lot.GetProperty("expiresOn").GetDateTime().Date, Is.EqualTo(expiredDate.ToDateTime(TimeOnly.MinValue).Date));
+
+        var summary = JsonSerializer.Deserialize<JsonElement>(await (await _client.GetAsync("/api/inventory/summary")).Content.ReadAsStringAsync())
+            .EnumerateArray().Single();
+        Assert.That(summary.GetProperty("totalQuantity").GetDecimal(), Is.EqualTo(1m));
+
+        var expiringLots = JsonSerializer.Deserialize<JsonElement>(await (await _client.GetAsync("/api/inventory/expiring")).Content.ReadAsStringAsync())
+            .EnumerateArray().ToList();
+        Assert.That(expiringLots.Count, Is.EqualTo(1));
+        Assert.That(expiringLots[0].GetProperty("expiresInDays").GetInt32(), Is.LessThan(0));
+        Assert.That(expiringLots[0].GetProperty("expiryStatus").GetString(), Is.EqualTo("Expired"));
+    }
+
+    [Test]
+    public async Task Consumable_inventory_mvp_flow_returns_replenishment_when_below_and_not_when_sufficient()
+    {
+        var (_, entryId) = await CreateItemAndEntry("Beans");
+
+        await _client.PostAsJsonAsync("/api/inventory-lots", new { inventoryEntryId = entryId, quantity = 1m, unit = "can", expiresOn = (DateOnly?)null, storageSlotId = (Guid?)null });
+
+        var suggestions = JsonSerializer.Deserialize<JsonElement>(await (await _client.GetAsync("/api/replenishment/suggestions")).Content.ReadAsStringAsync())
+            .EnumerateArray().ToList();
+        Assert.That(suggestions.Count, Is.EqualTo(1));
+        Assert.That(suggestions[0].GetProperty("requiredAmount").GetDecimal(), Is.EqualTo(1m));
+
+        await _client.PostAsJsonAsync("/api/inventory-lots", new { inventoryEntryId = entryId, quantity = 1m, unit = "can", expiresOn = (DateOnly?)null, storageSlotId = (Guid?)null });
+
+        suggestions = JsonSerializer.Deserialize<JsonElement>(await (await _client.GetAsync("/api/replenishment/suggestions")).Content.ReadAsStringAsync())
+            .EnumerateArray().ToList();
+        Assert.That(suggestions[0].GetProperty("requiredAmount").GetDecimal(), Is.EqualTo(0m));
+    }
+
+    [Test]
+    public async Task Legacy_replenishment_route_remains_available()
+    {
+        var response = await _client.GetAsync("/replenishment/suggestions");
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+    }
+
+    private async Task<(Guid itemId, Guid entryId)> CreateItemAndEntry(string name)
+    {
+        var itemResponse = await _client.PostAsJsonAsync("/api/item-definitions", new { name, kind = ItemKind.Consumable });
+        Assert.That(itemResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        var item = JsonSerializer.Deserialize<JsonElement>(await itemResponse.Content.ReadAsStringAsync());
+        var itemId = item.GetProperty("id").GetGuid();
+
+        var entryResponse = await _client.PostAsJsonAsync("/api/inventory-entries", new { itemDefinitionId = itemId, storageSlotId = (Guid?)null });
+        Assert.That(entryResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        var entry = JsonSerializer.Deserialize<JsonElement>(await entryResponse.Content.ReadAsStringAsync());
+
+        return (itemId, entry.GetProperty("id").GetGuid());
     }
 }

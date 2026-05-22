@@ -1,3 +1,5 @@
+using Phoodab.Domain;
+
 namespace Phoodab.Application;
 
 public sealed record InventoryLotReadModel(
@@ -6,4 +8,17 @@ public sealed record InventoryLotReadModel(
     string Unit,
     DateOnly? ExpiresOn,
     int? ExpiresInDays,
-    string ExpiryStatus);
+    string ExpiryStatus)
+{
+    public static InventoryLotReadModel From(InventoryLot lot, DateOnly todayUtc)
+    {
+        int? expiresInDays = lot.ExpiresOn is null ? null : lot.ExpiresOn.Value.DayNumber - todayUtc.DayNumber;
+        return new InventoryLotReadModel(
+            lot.Id,
+            lot.Quantity.Value,
+            lot.Unit.Value,
+            lot.ExpiresOn,
+            expiresInDays,
+            InventoryLotExpiryCalculator.GetExpiryStatus(expiresInDays));
+    }
+}
