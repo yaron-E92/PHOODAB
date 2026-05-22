@@ -6,6 +6,15 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("FrontendDev", policy =>
+    {
+        policy.WithOrigins("http://localhost:5173")
+            .AllowAnyHeader()
+            .AllowAnyMethod();
+    });
+});
 builder.Services.AddPhoodabEventing();
 
 builder.Services.AddSingleton<IUtcDateProvider, SystemUtcDateProvider>();
@@ -13,6 +22,8 @@ builder.Services.AddSingleton<ReplenishmentSuggestionService>();
 builder.Services.AddSingleton<IInventoryMvpStore, FileInventoryMvpStore>();
 
 var app = builder.Build();
+
+app.UseCors("FrontendDev");
 
 app.UseSwagger();
 app.UseSwaggerUI();
