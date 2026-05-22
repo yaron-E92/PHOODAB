@@ -9,7 +9,6 @@ builder.Services.AddSwaggerGen();
 builder.Services.AddPhoodabEventing();
 
 builder.Services.AddSingleton<IUtcDateProvider, SystemUtcDateProvider>();
-builder.Services.AddSingleton<InventoryLotExpiryCalculator>();
 builder.Services.AddSingleton<ReplenishmentSuggestionService>();
 builder.Services.AddSingleton<InventoryMvpStore>();
 
@@ -50,8 +49,8 @@ app.MapPost("/api/inventory-lots", (CreateInventoryLotRequest request, Inventory
 
 app.MapGet("/api/inventory/summary", (InventoryMvpStore store) => Results.Ok(store.GetSummary())).WithOpenApi();
 
-app.MapGet("/api/inventory/expiring", (InventoryMvpStore store, IUtcDateProvider utcDateProvider, InventoryLotExpiryCalculator expiryCalculator) =>
-    Results.Ok(store.GetExpiringLots(utcDateProvider.TodayUtc, expiryCalculator))).WithOpenApi();
+app.MapGet("/api/inventory/expiring", (InventoryMvpStore store, IUtcDateProvider utcDateProvider) =>
+    Results.Ok(store.GetExpiringLots(utcDateProvider.TodayUtc))).WithOpenApi();
 
 app.MapGet("/api/replenishment/suggestions", (ReplenishmentSuggestionService suggestionService, InventoryMvpStore store) =>
 {

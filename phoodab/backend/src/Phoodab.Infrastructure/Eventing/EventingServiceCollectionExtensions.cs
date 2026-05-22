@@ -16,7 +16,7 @@ public static class EventingServiceCollectionExtensions
         {
             var aggregator = new EventAggregator();
             aggregator.RegisterEventType<BatchHistoryEvent>();
-            aggregator.Subscribe(sp.GetRequiredService<IAsyncEventHandler<BatchHistoryEvent>>());
+            aggregator.SubscribeToEventType(sp.GetRequiredService<IAsyncEventHandler<BatchHistoryEvent>>());
             return aggregator;
         });
 

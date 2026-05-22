@@ -1,5 +1,7 @@
-using Phoodab.Application;
+using NUnit.Framework;
 using Phoodab.Domain;
+using System;
+using System.Linq;
 
 namespace Phoodab.Application.Tests;
 
@@ -116,7 +118,7 @@ public class ReplenishmentSuggestionServiceTests
     }
 
     private static ReplenishmentSuggestionService CreateService(DateOnly? today = null)
-        => new(new FakeUtcDateProvider(today ?? Today), new InventoryLotExpiryCalculator());
+        => new(new FakeUtcDateProvider(today ?? Today));
 
     private sealed class FakeUtcDateProvider(DateOnly today) : IUtcDateProvider
     {

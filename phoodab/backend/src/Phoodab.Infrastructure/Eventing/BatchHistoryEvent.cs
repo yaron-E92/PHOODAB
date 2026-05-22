@@ -1,4 +1,4 @@
-using Yaref92.Events.Models;
+using Yaref92.Events;
 
 namespace Phoodab.Infrastructure.Eventing;
 

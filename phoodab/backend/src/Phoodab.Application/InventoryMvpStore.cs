@@ -47,7 +47,7 @@ public sealed class InventoryMvpStore
         _inventoryLots.Add(lot);
 
         var existingRule = _rules.SingleOrDefault(r => r.ItemDefinitionId == entry.ItemDefinitionId);
-        if (existingRule is not null && string.Equals(existingRule.Unit.Symbol, "unit", StringComparison.OrdinalIgnoreCase))
+        if (existingRule is not null && string.Equals(existingRule.Unit.Value, "unit", StringComparison.OrdinalIgnoreCase))
         {
             _rules.Remove(existingRule);
             _rules.Add(new ReplenishmentRule(existingRule.Id, existingRule.ItemDefinitionId, existingRule.TargetAmount, new Unit(unit), existingRule.ExpiryWarningDays, existingRule.IsHidden, existingRule.IsDisabled));
@@ -67,18 +67,17 @@ public sealed class InventoryMvpStore
                 itemDefinitionId = e.ItemDefinitionId,
                 itemName = e.ItemDefinition.Name,
                 totalQuantity = lots.Sum(l => l.Quantity.Value),
-                unit = lots.FirstOrDefault()?.Unit.Symbol,
+                unit = lots.FirstOrDefault()?.Unit.Value,
                 lotCount = lots.Count
             } as object;
         }).ToList();
     }
 
-    public IReadOnlyList<InventoryLotReadModel> GetExpiringLots(DateOnly todayUtc, InventoryLotExpiryCalculator expiryCalculator)
+    public IReadOnlyList<InventoryLotReadModel> GetExpiringLots(DateOnly todayUtc)
     {
-        return _inventoryLots
-            .Select(lot => expiryCalculator.ToReadModel(lot, todayUtc))
-            .Where(lot => lot.ExpiryStatus is "Expired" or "Urgent" or "Soon")
-            .ToList();
+        return [.. _inventoryLots
+            .Select(lot => InventoryLotReadModel.From(lot, todayUtc))
+            .Where(lot => lot.ExpiryStatus is "Expired" or "Urgent" or "Soon")];
     }
 
     public IReadOnlyList<ReplenishmentRule> GetRules() => _rules;

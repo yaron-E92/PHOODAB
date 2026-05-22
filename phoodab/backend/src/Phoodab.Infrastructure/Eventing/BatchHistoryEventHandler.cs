@@ -5,7 +5,7 @@ namespace Phoodab.Infrastructure.Eventing;
 
 public sealed class BatchHistoryEventHandler(IEventHistoryStore eventHistoryStore) : IAsyncEventHandler<BatchHistoryEvent>
 {
-    public Task HandleAsync(BatchHistoryEvent @event, CancellationToken cancellationToken = default)
+    public Task OnNextAsync(BatchHistoryEvent @event, CancellationToken cancellationToken = default)
     {
         var record = new EventHistoryRecord(
             EventId: @event.EventIdValue,

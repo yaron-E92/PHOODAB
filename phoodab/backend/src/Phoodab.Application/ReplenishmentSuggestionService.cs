@@ -5,14 +5,10 @@ namespace Phoodab.Application;
 public sealed class ReplenishmentSuggestionService
 {
     private readonly IUtcDateProvider _utcDateProvider;
-    private readonly InventoryLotExpiryCalculator _inventoryLotExpiryCalculator;
 
-    public ReplenishmentSuggestionService(
-        IUtcDateProvider utcDateProvider,
-        InventoryLotExpiryCalculator inventoryLotExpiryCalculator)
+    public ReplenishmentSuggestionService(IUtcDateProvider utcDateProvider)
     {
         _utcDateProvider = utcDateProvider;
-        _inventoryLotExpiryCalculator = inventoryLotExpiryCalculator;
     }
 
     public IReadOnlyList<ReplenishmentSuggestionReadModel> GetSuggestions(
@@ -38,14 +34,14 @@ public sealed class ReplenishmentSuggestionService
             }
 
             var requiredAmount = Math.Max(0, rule.TargetAmount.Value - currentAndValid.currentAmount);
-            var lots = entry?.Lots.Select(lot => _inventoryLotExpiryCalculator.ToReadModel(lot, todayUtc)).ToList() ?? new List<InventoryLotReadModel>();
+            var lots = entry?.Lots.Select(lot => InventoryLotReadModel.From(lot, todayUtc)).ToList() ?? new List<InventoryLotReadModel>();
             results.Add(new ReplenishmentSuggestionReadModel(
                 rule.ItemDefinitionId,
                 entry?.ItemDefinition.Name ?? "Unknown Item",
                 currentAndValid.currentAmount,
                 rule.TargetAmount.Value,
                 requiredAmount,
-                rule.Unit.Symbol,
+                rule.Unit.Value,
                 lots));
         }
 
@@ -59,7 +55,7 @@ public sealed class ReplenishmentSuggestionService
             return (0, true);
         }
 
-        if (entry.Lots.Any(lot => !string.Equals(lot.Unit.Symbol, expectedUnit.Symbol, StringComparison.OrdinalIgnoreCase)))
+        if (entry.Lots.Any(lot => !string.Equals(lot.Unit.Value, expectedUnit.Value, StringComparison.OrdinalIgnoreCase)))
         {
             return (0, false);
         }
