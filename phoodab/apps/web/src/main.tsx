@@ -21,10 +21,12 @@ export function App() {
   const [version, setVersion] = useState<string>('loading');
 
   const [itemName, setItemName] = useState('');
+  const [minimumDesiredAmount, setMinimumDesiredAmount] = useState('');
   const [lotItemDefinitionId, setLotItemDefinitionId] = useState('');
   const [quantity, setQuantity] = useState('');
   const [unit, setUnit] = useState('');
   const [expiryDate, setExpiryDate] = useState('');
+  const [storageSlotId, setStorageSlotId] = useState('');
 
   const [summary, setSummary] = useState<InventorySummaryItem[]>([]);
   const [expiringLots, setExpiringLots] = useState<ExpiringLot[]>([]);
@@ -65,9 +67,14 @@ export function App() {
     if (!itemName.trim()) return;
 
     try {
-      const created = await createConsumableItem(baseUrl, itemName.trim());
+      const created = await createConsumableItem(baseUrl, {
+        name: itemName.trim(),
+        minimumDesiredAmount: minimumDesiredAmount ? Number(minimumDesiredAmount) : null,
+        replenishmentThreshold: minimumDesiredAmount ? Number(minimumDesiredAmount) : null
+      });
       setCreatedItems((current) => [created, ...current.filter((item) => item.id !== created.id)]);
       setItemName('');
+      setMinimumDesiredAmount('');
       setLotItemDefinitionId(created.id);
       await loadData();
     } catch (e) {
@@ -85,11 +92,12 @@ export function App() {
         quantity: Number(quantity),
         unit: unit.trim(),
         expiresOn: expiryDate || null,
-        storageSlotId: null
+        storageSlotId: storageSlotId || null
       });
       setQuantity('');
       setUnit('');
       setExpiryDate('');
+      setStorageSlotId('');
       await loadData();
     } catch (e) {
       setError(String(e));
@@ -105,6 +113,13 @@ export function App() {
       <h2>Create Consumable Item</h2>
       <form onSubmit={onCreateItem}>
         <input placeholder="Item name" value={itemName} onChange={(e) => setItemName(e.target.value)} />
+        <input
+          placeholder="Minimum desired amount (optional)"
+          type="number"
+          step="any"
+          value={minimumDesiredAmount}
+          onChange={(e) => setMinimumDesiredAmount(e.target.value)}
+        />
         <button type="submit">Create Item</button>
       </form>
 
@@ -128,6 +143,7 @@ export function App() {
         <input placeholder="Quantity" type="number" step="any" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
         <input placeholder="Unit" value={unit} onChange={(e) => setUnit(e.target.value)} />
         <input type="date" value={expiryDate} onChange={(e) => setExpiryDate(e.target.value)} />
+        <input placeholder="Storage slot ID (optional)" value={storageSlotId} onChange={(e) => setStorageSlotId(e.target.value)} />
         <button type="submit">Add Lot</button>
       </form>
 
