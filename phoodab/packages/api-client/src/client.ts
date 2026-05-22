@@ -62,11 +62,23 @@ export async function getVersion(baseUrl: string): Promise<VersionResponse> {
   return response.json();
 }
 
-export async function createConsumableItem(baseUrl: string, name: string): Promise<ItemDefinition> {
+export async function createConsumableItem(
+  baseUrl: string,
+  payload: {
+    name: string;
+    minimumDesiredAmount?: number | null;
+    replenishmentThreshold?: number | null;
+  }
+): Promise<ItemDefinition> {
   const response = await fetch(`${baseUrl}/api/item-definitions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, kind: 1 })
+    body: JSON.stringify({
+      name: payload.name,
+      kind: 1,
+      minimumDesiredAmount: payload.minimumDesiredAmount ?? null,
+      replenishmentThreshold: payload.replenishmentThreshold ?? null
+    })
   });
 
   if (!response.ok) throw new Error(`Create item failed: ${response.status}`);

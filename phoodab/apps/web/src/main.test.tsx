@@ -8,7 +8,7 @@ const getVersionMock = vi.fn().mockResolvedValue({ version: 'test' });
 const getInventorySummaryMock = vi.fn();
 const getExpiringLotsMock = vi.fn();
 const getReplenishmentSuggestionsMock = vi.fn();
-const createConsumableItemMock = vi.fn();
+const createConsumableItemMock = vi.fn().mockResolvedValue({ id: 'item-1', name: 'Milk', kind: 'Consumable' });
 const addInventoryLotMock = vi.fn();
 
 vi.mock('../../../packages/api-client/src/client', () => ({
