@@ -23,6 +23,14 @@ builder.Services.AddSingleton<IInventoryMvpStore, FileInventoryMvpStore>();
 
 var app = builder.Build();
 
+if (app.Environment.IsDevelopment())
+{
+    using var scope = app.Services.CreateScope();
+    var store = scope.ServiceProvider.GetRequiredService<IInventoryMvpStore>();
+    var utcDateProvider = scope.ServiceProvider.GetRequiredService<IUtcDateProvider>();
+    store.EnsureDevelopmentSeedData(utcDateProvider.TodayUtc);
+}
+
 app.UseCors("FrontendDev");
 
 app.UseSwagger();
@@ -71,6 +79,20 @@ app.MapGet("/api/replenishment/suggestions", (ReplenishmentSuggestionService sug
 .WithName("GetReplenishmentSuggestions")
 .WithOpenApi();
 
+app.MapPost("/api/shopping-list-items/from-suggestion", (CreateShoppingListItemFromSuggestionRequest request, IInventoryMvpStore store) =>
+{
+    var item = store.CreateOrUpdateShoppingListItemFromSuggestion(request.ItemDefinitionId, request.Quantity, request.Unit);
+    return Results.Ok(item);
+}).WithOpenApi();
+
+app.MapPatch("/api/shopping-list-items/{shoppingListItemId:guid}", (Guid shoppingListItemId, UpdateShoppingListItemStatusRequest request, IInventoryMvpStore store) =>
+{
+    var item = store.UpdateShoppingListItemStatus(shoppingListItemId, request.IsResolved, request.IsPurchased);
+    return item is null ? Results.NotFound() : Results.Ok(item);
+}).WithOpenApi();
+
+app.MapGet("/api/shopping-list-items", (IInventoryMvpStore store) => Results.Ok(store.GetShoppingListItems())).WithOpenApi();
+
 app.MapGet("/replenishment/suggestions", (ReplenishmentSuggestionService suggestionService, IInventoryMvpStore store) =>
 {
     var suggestions = suggestionService.GetSuggestions(store.GetRules(), store.GetInventoryEntries());
@@ -84,5 +106,7 @@ app.Run();
 public sealed record CreateItemDefinitionRequest(string Name, ItemKind Kind);
 public sealed record CreateInventoryEntryRequest(Guid ItemDefinitionId, Guid? StorageSlotId);
 public sealed record CreateInventoryLotRequest(Guid InventoryEntryId, decimal Quantity, string Unit, DateOnly? ExpiresOn, Guid? StorageSlotId);
+public sealed record CreateShoppingListItemFromSuggestionRequest(Guid ItemDefinitionId, decimal Quantity, string Unit);
+public sealed record UpdateShoppingListItemStatusRequest(bool? IsResolved, bool? IsPurchased);
 
 public partial class Program { }
