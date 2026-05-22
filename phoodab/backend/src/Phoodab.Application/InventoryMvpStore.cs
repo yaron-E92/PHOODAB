@@ -176,6 +176,8 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
         File.WriteAllText(_storePath, json);
     }
 
+    // Persisted state models are kept separate from domain entities because domain types are immutable
+    // and include value objects/collections that are reconstructed through domain constructors.
     private sealed class InventoryMvpState
     {
         public List<ItemDefinitionState> ItemDefinitions { get; set; } = [];
