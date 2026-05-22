@@ -50,6 +50,16 @@ export type ReplenishmentSuggestion = {
   }[];
 };
 
+export type ShoppingListItem = {
+  id: string;
+  itemDefinitionId: string;
+  itemName: string;
+  quantity: number;
+  unit: string;
+  isResolved: boolean;
+  isPurchased: boolean;
+};
+
 export async function getHealth(baseUrl: string): Promise<HealthResponse> {
   const response = await fetch(`${baseUrl}/health`);
   if (!response.ok) throw new Error(`Health failed: ${response.status}`);
@@ -140,5 +150,33 @@ export async function getExpiringLots(baseUrl: string): Promise<ExpiringLot[]> {
 export async function getReplenishmentSuggestions(baseUrl: string): Promise<ReplenishmentSuggestion[]> {
   const response = await fetch(`${baseUrl}/api/replenishment/suggestions`);
   if (!response.ok) throw new Error(`Suggestions failed: ${response.status}`);
+  return response.json();
+}
+
+export async function createShoppingListItemFromSuggestion(baseUrl: string, payload: { itemDefinitionId: string; quantity: number; unit: string }): Promise<ShoppingListItem> {
+  const response = await fetch(`${baseUrl}/api/shopping-list-items/from-suggestion`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) throw new Error(`Create shopping list item failed: ${response.status}`);
+  return response.json();
+}
+
+export async function updateShoppingListItemStatus(baseUrl: string, shoppingListItemId: string, payload: { isResolved?: boolean; isPurchased?: boolean }): Promise<ShoppingListItem> {
+  const response = await fetch(`${baseUrl}/api/shopping-list-items/${shoppingListItemId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) throw new Error(`Update shopping list item failed: ${response.status}`);
+  return response.json();
+}
+
+export async function getShoppingListItems(baseUrl: string): Promise<ShoppingListItem[]> {
+  const response = await fetch(`${baseUrl}/api/shopping-list-items`);
+  if (!response.ok) throw new Error(`Shopping list items failed: ${response.status}`);
   return response.json();
 }

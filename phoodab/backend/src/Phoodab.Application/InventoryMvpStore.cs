@@ -12,6 +12,10 @@ public interface IInventoryMvpStore
     IReadOnlyList<InventoryLotReadModel> GetExpiringLots(DateOnly todayUtc);
     IReadOnlyList<ReplenishmentRule> GetRules();
     IReadOnlyList<InventoryEntry> GetInventoryEntries();
+    void EnsureDevelopmentSeedData(DateOnly todayUtc);
+    object CreateOrUpdateShoppingListItemFromSuggestion(Guid itemDefinitionId, decimal quantity, string unit);
+    object? UpdateShoppingListItemStatus(Guid shoppingListItemId, bool? isResolved, bool? isPurchased);
+    IReadOnlyList<object> GetShoppingListItems();
 }
 
 public sealed class FileInventoryMvpStore : IInventoryMvpStore
@@ -159,6 +163,86 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
         }
     }
 
+    public void EnsureDevelopmentSeedData(DateOnly todayUtc)
+    {
+        lock (_sync)
+        {
+            var state = LoadState();
+            if (state.InventoryEntries.Count > 0)
+            {
+                return;
+            }
+
+            SeedItem(state, "Milk", 1m, "liter", todayUtc.AddDays(14));
+            SeedItem(state, "Eggs", 1m, "dozen", todayUtc.AddDays(2));
+            SeedItem(state, "Pasta", 0.5m, "kg", todayUtc.AddDays(-1));
+            SeedItem(state, "Rice", 0.25m, "kg", null);
+
+            SaveState(state);
+        }
+    }
+
+    public object CreateOrUpdateShoppingListItemFromSuggestion(Guid itemDefinitionId, decimal quantity, string unit)
+    {
+        lock (_sync)
+        {
+            var state = LoadState();
+            var itemDefinition = state.ItemDefinitions.SingleOrDefault(x => x.Id == itemDefinitionId)
+                ?? throw new InvalidOperationException("Item definition not found.");
+
+            var existing = state.ShoppingListItems.SingleOrDefault(x => x.ItemDefinitionId == itemDefinitionId && !x.IsResolved && !x.IsPurchased);
+            if (existing is not null)
+            {
+                var updated = existing with { Quantity = quantity, Unit = unit };
+                state.ShoppingListItems.Remove(existing);
+                state.ShoppingListItems.Add(updated);
+                SaveState(state);
+                return ToShoppingListReadModel(updated, itemDefinition.Name);
+            }
+
+            var created = new ShoppingListItemState(Guid.NewGuid(), itemDefinitionId, itemDefinition.Name, quantity, unit, false, false);
+            state.ShoppingListItems.Add(created);
+            SaveState(state);
+            return ToShoppingListReadModel(created, itemDefinition.Name);
+        }
+    }
+
+    public object? UpdateShoppingListItemStatus(Guid shoppingListItemId, bool? isResolved, bool? isPurchased)
+    {
+        lock (_sync)
+        {
+            var state = LoadState();
+            var existing = state.ShoppingListItems.SingleOrDefault(x => x.Id == shoppingListItemId);
+            if (existing is null)
+            {
+                return null;
+            }
+
+            var updated = existing with
+            {
+                IsResolved = isResolved ?? existing.IsResolved,
+                IsPurchased = isPurchased ?? existing.IsPurchased
+            };
+
+            state.ShoppingListItems.Remove(existing);
+            state.ShoppingListItems.Add(updated);
+            SaveState(state);
+            return ToShoppingListReadModel(updated, existing.ItemName);
+        }
+    }
+
+    public IReadOnlyList<object> GetShoppingListItems()
+    {
+        lock (_sync)
+        {
+            var state = LoadState();
+            return state.ShoppingListItems
+                .Select(x => ToShoppingListReadModel(x, x.ItemName))
+                .Cast<object>()
+                .ToList();
+        }
+    }
+
     private InventoryMvpState LoadState()
     {
         if (!File.Exists(_storePath))
@@ -184,10 +268,35 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
         public List<InventoryEntryState> InventoryEntries { get; set; } = [];
         public List<InventoryLotState> InventoryLots { get; set; } = [];
         public List<ReplenishmentRuleState> Rules { get; set; } = [];
+        public List<ShoppingListItemState> ShoppingListItems { get; set; } = [];
     }
+
+    private static void SeedItem(InventoryMvpState state, string name, decimal quantity, string unit, DateOnly? expiresOn)
+    {
+        var item = new ItemDefinitionState(Guid.NewGuid(), name, ItemKind.Consumable);
+        state.ItemDefinitions.Add(item);
+
+        var entry = new InventoryEntryState(Guid.NewGuid(), item.Id, null);
+        state.InventoryEntries.Add(entry);
+
+        state.InventoryLots.Add(new InventoryLotState(Guid.NewGuid(), entry.Id, item.Id, quantity, unit, expiresOn, null));
+        state.Rules.Add(new ReplenishmentRuleState(Guid.NewGuid(), item.Id, 2m, unit, 2, false, false));
+    }
+
+    private static object ToShoppingListReadModel(ShoppingListItemState state, string itemName) => new
+    {
+        id = state.Id,
+        itemDefinitionId = state.ItemDefinitionId,
+        itemName,
+        quantity = state.Quantity,
+        unit = state.Unit,
+        isResolved = state.IsResolved,
+        isPurchased = state.IsPurchased
+    };
 
     private sealed record ItemDefinitionState(Guid Id, string Name, ItemKind Kind);
     private sealed record InventoryEntryState(Guid Id, Guid ItemDefinitionId, Guid? StorageSlotId);
     private sealed record InventoryLotState(Guid Id, Guid InventoryEntryId, Guid ItemDefinitionId, decimal Quantity, string Unit, DateOnly? ExpiresOn, Guid? StorageSlotId);
     private sealed record ReplenishmentRuleState(Guid Id, Guid ItemDefinitionId, decimal TargetAmount, string Unit, int ExpiryWarningDays, bool IsHidden, bool IsDisabled);
+    private sealed record ShoppingListItemState(Guid Id, Guid ItemDefinitionId, string ItemName, decimal Quantity, string Unit, bool IsResolved, bool IsPurchased);
 }
