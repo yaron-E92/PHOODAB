@@ -2,7 +2,18 @@ using Phoodab.Domain;
 
 namespace Phoodab.Application;
 
-public sealed class InventoryMvpStore
+public interface IInventoryMvpStore
+{
+    ItemDefinition CreateItemDefinition(string name, ItemKind kind);
+    InventoryEntry? CreateInventoryEntry(Guid itemDefinitionId, Guid? storageSlotId);
+    InventoryLot? AddInventoryLot(Guid inventoryEntryId, decimal quantity, string unit, DateOnly? expiresOn, Guid? storageSlotId);
+    IReadOnlyList<object> GetSummary();
+    IReadOnlyList<InventoryLotReadModel> GetExpiringLots(DateOnly todayUtc);
+    IReadOnlyList<ReplenishmentRule> GetRules();
+    IReadOnlyList<InventoryEntry> GetInventoryEntries();
+}
+
+public sealed class InMemoryInventoryMvpStore : IInventoryMvpStore
 {
     private readonly List<ItemDefinition> _itemDefinitions = [];
     private readonly List<InventoryEntry> _inventoryEntries = [];
