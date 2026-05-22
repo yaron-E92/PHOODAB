@@ -60,6 +60,14 @@ app.MapGet("/api/replenishment/suggestions", (ReplenishmentSuggestionService sug
 .WithName("GetReplenishmentSuggestions")
 .WithOpenApi();
 
+app.MapGet("/replenishment/suggestions", (ReplenishmentSuggestionService suggestionService, InventoryMvpStore store) =>
+{
+    var suggestions = suggestionService.GetSuggestions(store.GetRules(), store.GetInventoryEntries());
+    return Results.Ok(suggestions);
+})
+.WithName("GetReplenishmentSuggestionsLegacy")
+.WithOpenApi();
+
 app.Run();
 
 public sealed record CreateItemDefinitionRequest(string Name, ItemKind Kind);
