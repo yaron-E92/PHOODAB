@@ -66,7 +66,7 @@ export async function createConsumableItem(baseUrl: string, name: string): Promi
   const response = await fetch(`${baseUrl}/api/item-definitions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, kind: 'Consumable' })
+    body: JSON.stringify({ name, kind: 1 })
   });
 
   if (!response.ok) throw new Error(`Create item failed: ${response.status}`);
