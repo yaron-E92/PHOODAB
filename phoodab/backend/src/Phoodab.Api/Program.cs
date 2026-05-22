@@ -10,7 +10,7 @@ builder.Services.AddPhoodabEventing();
 
 builder.Services.AddSingleton<IUtcDateProvider, SystemUtcDateProvider>();
 builder.Services.AddSingleton<ReplenishmentSuggestionService>();
-builder.Services.AddSingleton<InventoryMvpStore>();
+builder.Services.AddSingleton<IInventoryMvpStore, FileInventoryMvpStore>();
 
 var app = builder.Build();
 
@@ -29,35 +29,43 @@ app.MapGet("/version", () =>
 .WithName("GetVersion")
 .WithOpenApi();
 
-app.MapPost("/api/item-definitions", (CreateItemDefinitionRequest request, InventoryMvpStore store) =>
+app.MapPost("/api/item-definitions", (CreateItemDefinitionRequest request, IInventoryMvpStore store) =>
 {
     var item = store.CreateItemDefinition(request.Name, request.Kind);
     return Results.Ok(item);
 }).WithOpenApi();
 
-app.MapPost("/api/inventory-entries", (CreateInventoryEntryRequest request, InventoryMvpStore store) =>
+app.MapPost("/api/inventory-entries", (CreateInventoryEntryRequest request, IInventoryMvpStore store) =>
 {
     var entry = store.CreateInventoryEntry(request.ItemDefinitionId, request.StorageSlotId);
     return entry is null ? Results.NotFound() : Results.Ok(entry);
 }).WithOpenApi();
 
-app.MapPost("/api/inventory-lots", (CreateInventoryLotRequest request, InventoryMvpStore store) =>
+app.MapPost("/api/inventory-lots", (CreateInventoryLotRequest request, IInventoryMvpStore store) =>
 {
     var lot = store.AddInventoryLot(request.InventoryEntryId, request.Quantity, request.Unit, request.ExpiresOn, request.StorageSlotId);
     return lot is null ? Results.NotFound() : Results.Ok(lot);
 }).WithOpenApi();
 
-app.MapGet("/api/inventory/summary", (InventoryMvpStore store) => Results.Ok(store.GetSummary())).WithOpenApi();
+app.MapGet("/api/inventory/summary", (IInventoryMvpStore store) => Results.Ok(store.GetSummary())).WithOpenApi();
 
-app.MapGet("/api/inventory/expiring", (InventoryMvpStore store, IUtcDateProvider utcDateProvider) =>
+app.MapGet("/api/inventory/expiring", (IInventoryMvpStore store, IUtcDateProvider utcDateProvider) =>
     Results.Ok(store.GetExpiringLots(utcDateProvider.TodayUtc))).WithOpenApi();
 
-app.MapGet("/api/replenishment/suggestions", (ReplenishmentSuggestionService suggestionService, InventoryMvpStore store) =>
+app.MapGet("/api/replenishment/suggestions", (ReplenishmentSuggestionService suggestionService, IInventoryMvpStore store) =>
 {
     var suggestions = suggestionService.GetSuggestions(store.GetRules(), store.GetInventoryEntries());
     return Results.Ok(suggestions);
 })
 .WithName("GetReplenishmentSuggestions")
+.WithOpenApi();
+
+app.MapGet("/replenishment/suggestions", (ReplenishmentSuggestionService suggestionService, IInventoryMvpStore store) =>
+{
+    var suggestions = suggestionService.GetSuggestions(store.GetRules(), store.GetInventoryEntries());
+    return Results.Ok(suggestions);
+})
+.WithName("GetReplenishmentSuggestionsLegacy")
 .WithOpenApi();
 
 app.Run();
