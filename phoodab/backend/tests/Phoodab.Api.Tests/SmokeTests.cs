@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -13,12 +14,23 @@ namespace Phoodab.Api.Tests;
 
 public class SmokeTests
 {
+    private static void ResetStoreFile()
+    {
+        var basePath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var filePath = Path.Combine(basePath, "phoodab", "inventory-mvp-store.json");
+        if (File.Exists(filePath))
+        {
+            File.Delete(filePath);
+        }
+    }
+
     private WebApplicationFactory<Program> _factory = null!;
     private HttpClient _client = null!;
 
     [SetUp]
     public void SetUp()
     {
+        ResetStoreFile();
         _factory = new WebApplicationFactory<Program>();
         _client = _factory.CreateClient();
     }

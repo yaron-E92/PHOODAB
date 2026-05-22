@@ -10,7 +10,7 @@ builder.Services.AddPhoodabEventing();
 
 builder.Services.AddSingleton<IUtcDateProvider, SystemUtcDateProvider>();
 builder.Services.AddSingleton<ReplenishmentSuggestionService>();
-builder.Services.AddSingleton<IInventoryMvpStore, InMemoryInventoryMvpStore>();
+builder.Services.AddSingleton<IInventoryMvpStore, FileInventoryMvpStore>();
 
 var app = builder.Build();
 
