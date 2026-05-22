@@ -78,7 +78,7 @@ public class SmokeTests
     [Test]
     public async Task Add_lot_with_quantity_and_expiry_date_is_reflected_in_summary_and_expiring_views()
     {
-        var (_, entryId) = await CreateItemAndEntry("Milk");
+        var (itemId, entryId) = await CreateItemAndEntry("Milk");
 
         var expiredDate = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(-1));
         var lotResponse = await _client.PostAsJsonAsync("/api/inventory-lots", new { inventoryEntryId = entryId, quantity = 1m, unit = "liter", expiresOn = expiredDate, storageSlotId = (Guid?)null });
@@ -89,7 +89,7 @@ public class SmokeTests
         Assert.That(lot.GetProperty("expiresOn").GetDateTime().Date, Is.EqualTo(expiredDate.ToDateTime(TimeOnly.MinValue).Date));
 
         var summary = JsonSerializer.Deserialize<JsonElement>(await (await _client.GetAsync("/api/inventory/summary")).Content.ReadAsStringAsync())
-            .EnumerateArray().Single();
+            .EnumerateArray().Single(x => x.GetProperty("itemDefinitionId").GetGuid() == itemId);
         Assert.That(summary.GetProperty("totalQuantity").GetDecimal(), Is.EqualTo(1m));
 
         var expiringLots = JsonSerializer.Deserialize<JsonElement>(await (await _client.GetAsync("/api/inventory/expiring")).Content.ReadAsStringAsync())
@@ -102,20 +102,21 @@ public class SmokeTests
     [Test]
     public async Task Consumable_inventory_mvp_flow_returns_replenishment_when_below_and_not_when_sufficient()
     {
-        var (_, entryId) = await CreateItemAndEntry("Beans");
+        var (itemId, entryId) = await CreateItemAndEntry("Beans");
 
         await _client.PostAsJsonAsync("/api/inventory-lots", new { inventoryEntryId = entryId, quantity = 1m, unit = "can", expiresOn = (DateOnly?)null, storageSlotId = (Guid?)null });
 
         var suggestions = JsonSerializer.Deserialize<JsonElement>(await (await _client.GetAsync("/api/replenishment/suggestions")).Content.ReadAsStringAsync())
             .EnumerateArray().ToList();
-        Assert.That(suggestions.Count, Is.EqualTo(1));
-        Assert.That(suggestions[0].GetProperty("requiredAmount").GetDecimal(), Is.EqualTo(1m));
+        var suggestion = suggestions.Single(x => x.GetProperty("itemDefinitionId").GetGuid() == itemId);
+        Assert.That(suggestion.GetProperty("requiredAmount").GetDecimal(), Is.EqualTo(1m));
 
         await _client.PostAsJsonAsync("/api/inventory-lots", new { inventoryEntryId = entryId, quantity = 1m, unit = "can", expiresOn = (DateOnly?)null, storageSlotId = (Guid?)null });
 
         suggestions = JsonSerializer.Deserialize<JsonElement>(await (await _client.GetAsync("/api/replenishment/suggestions")).Content.ReadAsStringAsync())
             .EnumerateArray().ToList();
-        Assert.That(suggestions[0].GetProperty("requiredAmount").GetDecimal(), Is.EqualTo(0m));
+        suggestion = suggestions.Single(x => x.GetProperty("itemDefinitionId").GetGuid() == itemId);
+        Assert.That(suggestion.GetProperty("requiredAmount").GetDecimal(), Is.EqualTo(0m));
     }
 
     [Test]
