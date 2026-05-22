@@ -25,6 +25,7 @@ export function App() {
   const [quantity, setQuantity] = useState('');
   const [unit, setUnit] = useState('');
   const [expiryDate, setExpiryDate] = useState('');
+  const [storageSlotId, setStorageSlotId] = useState('');
 
   const [summary, setSummary] = useState<InventorySummaryItem[]>([]);
   const [expiringLots, setExpiringLots] = useState<ExpiringLot[]>([]);
@@ -85,11 +86,12 @@ export function App() {
         quantity: Number(quantity),
         unit: unit.trim(),
         expiresOn: expiryDate || null,
-        storageSlotId: null
+        storageSlotId: storageSlotId || null
       });
       setQuantity('');
       setUnit('');
       setExpiryDate('');
+      setStorageSlotId('');
       await loadData();
     } catch (e) {
       setError(String(e));
@@ -128,6 +130,7 @@ export function App() {
         <input placeholder="Quantity" type="number" step="any" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
         <input placeholder="Unit" value={unit} onChange={(e) => setUnit(e.target.value)} />
         <input type="date" value={expiryDate} onChange={(e) => setExpiryDate(e.target.value)} />
+        <input placeholder="Storage slot ID (optional)" value={storageSlotId} onChange={(e) => setStorageSlotId(e.target.value)} />
         <button type="submit">Add Lot</button>
       </form>
 
