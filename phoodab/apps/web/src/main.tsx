@@ -54,29 +54,6 @@ export function App() {
     }
   };
 
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const loadData = async () => {
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const [summaryData, expiringData, suggestionData] = await Promise.all([
-        getInventorySummary(baseUrl),
-        getExpiringLots(baseUrl),
-        getReplenishmentSuggestions(baseUrl)
-      ]);
-      setSummary(summaryData);
-      setExpiringLots(expiringData);
-      setSuggestions(suggestionData);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   useEffect(() => {
     getHealth(baseUrl).then((r) => setHealth(r.status)).catch((e) => setHealth(String(e)));
     getVersion(baseUrl).then((r) => setVersion(r.version)).catch((e) => setVersion(String(e)));
