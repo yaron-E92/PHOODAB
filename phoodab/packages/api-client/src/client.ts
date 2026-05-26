@@ -50,6 +50,15 @@ export type ReplenishmentSuggestion = {
   }[];
 };
 
+export type ReplenishmentRule = {
+  id: string;
+  itemDefinitionId: string;
+  desiredAmount: number;
+  desiredUnit: string;
+  expiryWarningDays: number;
+  isDisabled: boolean;
+};
+
 export type ShoppingListItem = {
   id: string;
   itemDefinitionId: string;
@@ -76,8 +85,8 @@ export async function createConsumableItem(
   baseUrl: string,
   payload: {
     name: string;
-    minimumDesiredAmount?: number | null;
-    replenishmentThreshold?: number | null;
+    desiredAmount?: number | null;
+    desiredUnit?: string | null;
   }
 ): Promise<ItemDefinition> {
   const response = await fetch(`${baseUrl}/api/item-definitions`, {
@@ -86,8 +95,8 @@ export async function createConsumableItem(
     body: JSON.stringify({
       name: payload.name,
       kind: 1,
-      minimumDesiredAmount: payload.minimumDesiredAmount ?? null,
-      replenishmentThreshold: payload.replenishmentThreshold ?? null
+      desiredAmount: payload.desiredAmount ?? null,
+      desiredUnit: payload.desiredUnit ?? null
     })
   });
 
@@ -150,6 +159,26 @@ export async function getExpiringLots(baseUrl: string): Promise<ExpiringLot[]> {
 export async function getReplenishmentSuggestions(baseUrl: string): Promise<ReplenishmentSuggestion[]> {
   const response = await fetch(`${baseUrl}/api/replenishment/suggestions`);
   if (!response.ok) throw new Error(`Suggestions failed: ${response.status}`);
+  return response.json();
+}
+
+export async function getReplenishmentRules(baseUrl: string): Promise<ReplenishmentRule[]> {
+  const response = await fetch(`${baseUrl}/api/replenishment/rules`);
+  if (!response.ok) throw new Error(`Rules failed: ${response.status}`);
+  return response.json();
+}
+
+export async function updateReplenishmentRule(
+  baseUrl: string,
+  ruleId: string,
+  payload: { desiredAmount?: number; desiredUnit?: string; expiryWarningDays?: number; isDisabled?: boolean }
+): Promise<ReplenishmentRule> {
+  const response = await fetch(`${baseUrl}/api/replenishment/rules/${ruleId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) throw new Error(`Update rule failed: ${response.status}`);
   return response.json();
 }
 

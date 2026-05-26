@@ -5,12 +5,13 @@ namespace Phoodab.Application;
 
 public interface IInventoryMvpStore
 {
-    ItemDefinition CreateItemDefinition(string name, ItemKind kind);
+    ItemDefinition CreateItemDefinition(string name, ItemKind kind, decimal? desiredAmount = null, string? desiredUnit = null);
     InventoryEntry? CreateInventoryEntry(Guid itemDefinitionId, Guid? storageSlotId);
     InventoryLot? AddInventoryLot(Guid inventoryEntryId, decimal quantity, string unit, DateOnly? expiresOn, Guid? storageSlotId);
     IReadOnlyList<object> GetSummary();
     IReadOnlyList<InventoryLotReadModel> GetExpiringLots(DateOnly todayUtc);
     IReadOnlyList<ReplenishmentRule> GetRules();
+    ReplenishmentRule? UpdateRule(Guid ruleId, decimal? desiredAmount, string? desiredUnit, bool? isDisabled, int? expiryWarningDays);
     IReadOnlyList<InventoryEntry> GetInventoryEntries();
     void EnsureDevelopmentSeedData(DateOnly todayUtc);
     object CreateOrUpdateShoppingListItemFromSuggestion(Guid itemDefinitionId, decimal quantity, string unit);
@@ -33,13 +34,14 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
         _storePath = Path.Combine(directory, "inventory-mvp-store.json");
     }
 
-    public ItemDefinition CreateItemDefinition(string name, ItemKind kind)
+    public ItemDefinition CreateItemDefinition(string name, ItemKind kind, decimal? desiredAmount = null, string? desiredUnit = null)
     {
         lock (_sync)
         {
             var state = LoadState();
             var item = new ItemDefinition(Guid.NewGuid(), name, kind);
             state.ItemDefinitions.Add(new ItemDefinitionState(item.Id, item.Name, item.Kind));
+            state.Rules.Add(new ReplenishmentRuleState(Guid.NewGuid(), item.Id, desiredAmount ?? 2m, desiredUnit ?? "unit", 2, false, false));
             SaveState(state);
             return item;
         }
@@ -138,6 +140,31 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
             return state.Rules
                 .Select(r => new ReplenishmentRule(r.Id, r.ItemDefinitionId, Quantity.From(r.TargetAmount), new Unit(r.Unit), r.ExpiryWarningDays, r.IsHidden, r.IsDisabled))
                 .ToList();
+        }
+    }
+
+    public ReplenishmentRule? UpdateRule(Guid ruleId, decimal? desiredAmount, string? desiredUnit, bool? isDisabled, int? expiryWarningDays)
+    {
+        lock (_sync)
+        {
+            var state = LoadState();
+            var existing = state.Rules.SingleOrDefault(r => r.Id == ruleId);
+            if (existing is null)
+            {
+                return null;
+            }
+
+            var updated = existing with
+            {
+                TargetAmount = desiredAmount ?? existing.TargetAmount,
+                Unit = string.IsNullOrWhiteSpace(desiredUnit) ? existing.Unit : desiredUnit.Trim(),
+                IsDisabled = isDisabled ?? existing.IsDisabled,
+                ExpiryWarningDays = expiryWarningDays ?? existing.ExpiryWarningDays
+            };
+            state.Rules.Remove(existing);
+            state.Rules.Add(updated);
+            SaveState(state);
+            return new ReplenishmentRule(updated.Id, updated.ItemDefinitionId, Quantity.From(updated.TargetAmount), new Unit(updated.Unit), updated.ExpiryWarningDays, updated.IsHidden, updated.IsDisabled);
         }
     }
 
