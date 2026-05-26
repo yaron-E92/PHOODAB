@@ -39,3 +39,21 @@ npm run dev
 ```
 
 The web shell calls `/health` and `/version` through `@phoodab/api-client` generated functions.
+
+## Manual CI Fallback
+
+CI normally runs for pull requests and pushes to `main`. If a pull request branch update does not create a CI run, trigger the same workflow manually:
+
+```bash
+gh workflow run CI --repo yaron-E92/PHOODAB --ref <pr-branch>
+gh run list --repo yaron-E92/PHOODAB --branch <pr-branch> --limit 5
+```
+
+## MVP Demo Flow
+
+- Start backend (`dotnet run` in `phoodab/backend/src/Phoodab.Api`) with `ASPNETCORE_ENVIRONMENT=Development` to auto-seed Milk, Eggs, Pasta, and Rice demo data.
+- Start web (`npm run dev` in `phoodab/apps/web`).
+- Open the app and review **Inventory Summary**, **Expiring / Expired Lots**, and **Replenishment Suggestions**.
+- In **Replenishment Suggestions**, click **Add to Shopping List**.
+- In **Shopping List**, click **Mark Purchased** for the created row.
+- Expected result: suggestion becomes a shopping-list item and updates to Purchased/Resolved.

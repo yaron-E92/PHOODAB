@@ -7,11 +7,15 @@ import {
   getHealth,
   getInventorySummary,
   getReplenishmentSuggestions,
+  getShoppingListItems,
   getVersion,
+  createShoppingListItemFromSuggestion,
+  updateShoppingListItemStatus,
   type ExpiringLot,
   type InventorySummaryItem,
   type ReplenishmentSuggestion,
-  type ItemDefinition
+  type ItemDefinition,
+  type ShoppingListItem
 } from '../../../packages/api-client/src/client';
 
 const baseUrl = 'http://localhost:5199';
@@ -32,6 +36,7 @@ export function App() {
   const [expiringLots, setExpiringLots] = useState<ExpiringLot[]>([]);
   const [suggestions, setSuggestions] = useState<ReplenishmentSuggestion[]>([]);
   const [createdItems, setCreatedItems] = useState<ItemDefinition[]>([]);
+  const [shoppingListItems, setShoppingListItems] = useState<ShoppingListItem[]>([]);
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -41,19 +46,35 @@ export function App() {
     setError(null);
 
     try {
-      const [summaryData, expiringData, suggestionData] = await Promise.all([
+      const [summaryData, expiringData, suggestionData, shoppingData] = await Promise.all([
         getInventorySummary(baseUrl),
         getExpiringLots(baseUrl),
-        getReplenishmentSuggestions(baseUrl)
+        getReplenishmentSuggestions(baseUrl),
+        getShoppingListItems(baseUrl)
       ]);
       setSummary(summaryData);
       setExpiringLots(expiringData);
       setSuggestions(suggestionData);
+      setShoppingListItems(shoppingData);
     } catch (e) {
       setError(String(e));
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const onCreateFromSuggestion = async (suggestion: ReplenishmentSuggestion) => {
+    await createShoppingListItemFromSuggestion(baseUrl, {
+      itemDefinitionId: suggestion.itemDefinitionId,
+      quantity: suggestion.requiredAmount,
+      unit: suggestion.unit
+    });
+    await loadData();
+  };
+
+  const onMarkPurchased = async (item: ShoppingListItem) => {
+    await updateShoppingListItemStatus(baseUrl, item.id, { isResolved: true, isPurchased: true });
+    await loadData();
   };
 
   useEffect(() => {
@@ -180,6 +201,26 @@ export function App() {
           {suggestions.map((suggestion) => (
             <li key={suggestion.itemDefinitionId}>
               {suggestion.itemName}: {suggestion.requiredAmount} {suggestion.unit}
+              <button style={{ marginLeft: 8 }} onClick={() => onCreateFromSuggestion(suggestion)}>
+                Add to Shopping List
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <h2>Shopping List</h2>
+      {!isLoading && !error && shoppingListItems.length === 0 && <p>No shopping items.</p>}
+      {!isLoading && !error && shoppingListItems.length > 0 && (
+        <ul>
+          {shoppingListItems.map((item) => (
+            <li key={item.id}>
+              {item.itemName}: {item.quantity} {item.unit} [{item.isPurchased ? 'Purchased' : item.isResolved ? 'Resolved' : 'Open'}]
+              {!item.isPurchased && (
+                <button style={{ marginLeft: 8 }} onClick={() => onMarkPurchased(item)}>
+                  Mark Purchased
+                </button>
+              )}
             </li>
           ))}
         </ul>
