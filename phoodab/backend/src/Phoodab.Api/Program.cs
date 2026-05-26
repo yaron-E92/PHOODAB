@@ -50,7 +50,7 @@ app.MapGet("/version", () =>
 
 app.MapPost("/api/item-definitions", (CreateItemDefinitionRequest request, IInventoryMvpStore store) =>
 {
-    var item = store.CreateItemDefinition(request.Name, request.Kind);
+    var item = store.CreateItemDefinition(request.Name, request.Kind, request.DesiredAmount, request.DesiredUnit);
     return Results.Ok(item);
 }).WithOpenApi();
 
@@ -79,6 +79,35 @@ app.MapGet("/api/replenishment/suggestions", (ReplenishmentSuggestionService sug
 .WithName("GetReplenishmentSuggestions")
 .WithOpenApi();
 
+app.MapGet("/api/replenishment/rules", (IInventoryMvpStore store) =>
+{
+    var rules = store.GetRules().Select(rule => new
+    {
+        id = rule.Id,
+        itemDefinitionId = rule.ItemDefinitionId,
+        desiredAmount = rule.TargetAmount.Value,
+        desiredUnit = rule.Unit.Value,
+        expiryWarningDays = rule.ExpiryWarningDays,
+        isDisabled = rule.IsDisabled
+    });
+    return Results.Ok(rules);
+}).WithOpenApi();
+
+app.MapPatch("/api/replenishment/rules/{ruleId:guid}", (Guid ruleId, UpdateReplenishmentRuleRequest request, IInventoryMvpStore store) =>
+{
+    var updated = store.UpdateRule(ruleId, request.DesiredAmount, request.DesiredUnit, request.IsDisabled, request.ExpiryWarningDays);
+    if (updated is null) return Results.NotFound();
+    return Results.Ok(new
+    {
+        id = updated.Id,
+        itemDefinitionId = updated.ItemDefinitionId,
+        desiredAmount = updated.TargetAmount.Value,
+        desiredUnit = updated.Unit.Value,
+        expiryWarningDays = updated.ExpiryWarningDays,
+        isDisabled = updated.IsDisabled
+    });
+}).WithOpenApi();
+
 app.MapPost("/api/shopping-list-items/from-suggestion", (CreateShoppingListItemFromSuggestionRequest request, IInventoryMvpStore store) =>
 {
     var item = store.CreateOrUpdateShoppingListItemFromSuggestion(request.ItemDefinitionId, request.Quantity, request.Unit);
@@ -103,10 +132,11 @@ app.MapGet("/replenishment/suggestions", (ReplenishmentSuggestionService suggest
 
 app.Run();
 
-public sealed record CreateItemDefinitionRequest(string Name, ItemKind Kind);
+public sealed record CreateItemDefinitionRequest(string Name, ItemKind Kind, decimal? DesiredAmount, string? DesiredUnit);
 public sealed record CreateInventoryEntryRequest(Guid ItemDefinitionId, Guid? StorageSlotId);
 public sealed record CreateInventoryLotRequest(Guid InventoryEntryId, decimal Quantity, string Unit, DateOnly? ExpiresOn, Guid? StorageSlotId);
 public sealed record CreateShoppingListItemFromSuggestionRequest(Guid ItemDefinitionId, decimal Quantity, string Unit);
 public sealed record UpdateShoppingListItemStatusRequest(bool? IsResolved, bool? IsPurchased);
+public sealed record UpdateReplenishmentRuleRequest(decimal? DesiredAmount, string? DesiredUnit, bool? IsDisabled, int? ExpiryWarningDays);
 
 public partial class Program { }

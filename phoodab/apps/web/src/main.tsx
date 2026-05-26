@@ -7,13 +7,16 @@ import {
   getHealth,
   getInventorySummary,
   getReplenishmentSuggestions,
+  getReplenishmentRules,
   getShoppingListItems,
   getVersion,
   createShoppingListItemFromSuggestion,
   updateShoppingListItemStatus,
+  updateReplenishmentRule,
   type ExpiringLot,
   type InventorySummaryItem,
   type ReplenishmentSuggestion,
+  type ReplenishmentRule,
   type ItemDefinition,
   type ShoppingListItem
 } from '../../../packages/api-client/src/client';
@@ -25,7 +28,8 @@ export function App() {
   const [version, setVersion] = useState<string>('loading');
 
   const [itemName, setItemName] = useState('');
-  const [minimumDesiredAmount, setMinimumDesiredAmount] = useState('');
+  const [desiredAmount, setDesiredAmount] = useState('');
+  const [desiredUnit, setDesiredUnit] = useState('');
   const [lotItemDefinitionId, setLotItemDefinitionId] = useState('');
   const [quantity, setQuantity] = useState('');
   const [unit, setUnit] = useState('');
@@ -37,6 +41,7 @@ export function App() {
   const [suggestions, setSuggestions] = useState<ReplenishmentSuggestion[]>([]);
   const [createdItems, setCreatedItems] = useState<ItemDefinition[]>([]);
   const [shoppingListItems, setShoppingListItems] = useState<ShoppingListItem[]>([]);
+  const [rules, setRules] = useState<ReplenishmentRule[]>([]);
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -46,16 +51,18 @@ export function App() {
     setError(null);
 
     try {
-      const [summaryData, expiringData, suggestionData, shoppingData] = await Promise.all([
+      const [summaryData, expiringData, suggestionData, shoppingData, rulesData] = await Promise.all([
         getInventorySummary(baseUrl),
         getExpiringLots(baseUrl),
         getReplenishmentSuggestions(baseUrl),
-        getShoppingListItems(baseUrl)
+        getShoppingListItems(baseUrl),
+        getReplenishmentRules(baseUrl)
       ]);
       setSummary(summaryData);
       setExpiringLots(expiringData);
       setSuggestions(suggestionData);
       setShoppingListItems(shoppingData);
+      setRules(rulesData);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -90,12 +97,13 @@ export function App() {
     try {
       const created = await createConsumableItem(baseUrl, {
         name: itemName.trim(),
-        minimumDesiredAmount: minimumDesiredAmount ? Number(minimumDesiredAmount) : null,
-        replenishmentThreshold: minimumDesiredAmount ? Number(minimumDesiredAmount) : null
+        desiredAmount: desiredAmount ? Number(desiredAmount) : null,
+        desiredUnit: desiredUnit.trim() || null
       });
       setCreatedItems((current) => [created, ...current.filter((item) => item.id !== created.id)]);
       setItemName('');
-      setMinimumDesiredAmount('');
+      setDesiredAmount('');
+      setDesiredUnit('');
       setLotItemDefinitionId(created.id);
       await loadData();
     } catch (e) {
@@ -125,6 +133,16 @@ export function App() {
     }
   };
 
+  const onSaveRule = async (rule: ReplenishmentRule) => {
+    await updateReplenishmentRule(baseUrl, rule.id, {
+      desiredAmount: rule.desiredAmount,
+      desiredUnit: rule.desiredUnit,
+      expiryWarningDays: rule.expiryWarningDays,
+      isDisabled: rule.isDisabled
+    });
+    await loadData();
+  };
+
   return (
     <main style={{ fontFamily: 'system-ui', padding: 16 }}>
       <h1>PHOODAB Pantry MVP</h1>
@@ -135,12 +153,13 @@ export function App() {
       <form onSubmit={onCreateItem}>
         <input placeholder="Item name" value={itemName} onChange={(e) => setItemName(e.target.value)} />
         <input
-          placeholder="Minimum desired amount (optional)"
+          placeholder="Desired amount (optional)"
           type="number"
           step="any"
-          value={minimumDesiredAmount}
-          onChange={(e) => setMinimumDesiredAmount(e.target.value)}
+          value={desiredAmount}
+          onChange={(e) => setDesiredAmount(e.target.value)}
         />
+        <input placeholder="Desired unit (optional)" value={desiredUnit} onChange={(e) => setDesiredUnit(e.target.value)} />
         <button type="submit">Create Item</button>
       </form>
 
@@ -204,6 +223,26 @@ export function App() {
               <button style={{ marginLeft: 8 }} onClick={() => onCreateFromSuggestion(suggestion)}>
                 Add to Shopping List
               </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <h2>Replenishment Rules</h2>
+      {!isLoading && !error && rules.length === 0 && <p>No rules.</p>}
+      {!isLoading && !error && rules.length > 0 && (
+        <ul>
+          {rules.map((rule) => (
+            <li key={rule.id}>
+              {summary.find((x) => x.itemDefinitionId === rule.itemDefinitionId)?.itemName ?? rule.itemDefinitionId}:{' '}
+              <input type="number" step="any" value={rule.desiredAmount} onChange={(e) => setRules((cur) => cur.map((r) => (r.id === rule.id ? { ...r, desiredAmount: Number(e.target.value) } : r)))} />
+              <input value={rule.desiredUnit} onChange={(e) => setRules((cur) => cur.map((r) => (r.id === rule.id ? { ...r, desiredUnit: e.target.value } : r)))} />
+              <input type="number" min={0} value={rule.expiryWarningDays} onChange={(e) => setRules((cur) => cur.map((r) => (r.id === rule.id ? { ...r, expiryWarningDays: Number(e.target.value) } : r)))} />
+              <label>
+                Disabled
+                <input type="checkbox" checked={rule.isDisabled} onChange={(e) => setRules((cur) => cur.map((r) => (r.id === rule.id ? { ...r, isDisabled: e.target.checked } : r)))} />
+              </label>
+              <button style={{ marginLeft: 8 }} onClick={() => onSaveRule(rule)}>Save</button>
             </li>
           ))}
         </ul>
