@@ -173,7 +173,7 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
                 return;
             }
 
-            SeedItem(state, "Milk", 1m, "liter", todayUtc.AddDays(14));
+            SeedItem(state, "Milk", 2m, "liter", todayUtc.AddDays(14));
             SeedItem(state, "Eggs", 1m, "dozen", todayUtc.AddDays(2));
             SeedItem(state, "Pasta", 0.5m, "kg", todayUtc.AddDays(-1));
             SeedItem(state, "Rice", 0.25m, "kg", null);

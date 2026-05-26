@@ -76,6 +76,26 @@ public class SmokeTests
     }
 
     [Test]
+    public async Task Development_seed_data_contains_demo_stock_and_expiry_mix()
+    {
+        var suggestions = JsonSerializer.Deserialize<JsonElement>(await (await _client.GetAsync("/api/replenishment/suggestions")).Content.ReadAsStringAsync())
+            .EnumerateArray().ToList();
+
+        Assert.That(suggestions.Select(x => x.GetProperty("itemName").GetString()), Is.SupersetOf(new[] { "Milk", "Eggs", "Pasta", "Rice" }));
+
+        var milk = suggestions.Single(x => x.GetProperty("itemName").GetString() == "Milk");
+        var eggs = suggestions.Single(x => x.GetProperty("itemName").GetString() == "Eggs");
+        var pasta = suggestions.Single(x => x.GetProperty("itemName").GetString() == "Pasta");
+        var rice = suggestions.Single(x => x.GetProperty("itemName").GetString() == "Rice");
+
+        Assert.That(milk.GetProperty("requiredAmount").GetDecimal(), Is.EqualTo(0m));
+        Assert.That(eggs.GetProperty("requiredAmount").GetDecimal(), Is.GreaterThan(0m));
+        Assert.That(rice.GetProperty("requiredAmount").GetDecimal(), Is.GreaterThan(0m));
+        Assert.That(eggs.GetProperty("lots").EnumerateArray().Single().GetProperty("expiryStatus").GetString(), Is.EqualTo("Urgent"));
+        Assert.That(pasta.GetProperty("lots").EnumerateArray().Single().GetProperty("expiryStatus").GetString(), Is.EqualTo("Expired"));
+    }
+
+    [Test]
     public async Task Add_lot_with_quantity_and_expiry_date_is_reflected_in_summary_and_expiring_views()
     {
         var (itemId, entryId) = await CreateItemAndEntry("Milk");
