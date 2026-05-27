@@ -141,6 +141,94 @@ public class SmokeTests
     }
 
     [Test]
+    public async Task Replenishment_rule_patch_updates_desired_amount_and_unit_used_by_suggestions()
+    {
+        var itemResponse = await _client.PostAsJsonAsync("/api/item-definitions", new { name = "Lentils", kind = ItemKind.Consumable, desiredAmount = 2m, desiredUnit = "bag" });
+        Assert.That(itemResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        var item = JsonSerializer.Deserialize<JsonElement>(await itemResponse.Content.ReadAsStringAsync());
+        var itemId = item.GetProperty("id").GetGuid();
+
+        var rule = await GetRuleForItem(itemId);
+        Assert.Multiple(() =>
+        {
+            Assert.That(rule.GetProperty("desiredAmount").GetDecimal(), Is.EqualTo(2m));
+            Assert.That(rule.GetProperty("desiredUnit").GetString(), Is.EqualTo("bag"));
+            Assert.That(rule.GetProperty("expiryWarningDays").GetInt32(), Is.EqualTo(2));
+            Assert.That(rule.GetProperty("isDisabled").GetBoolean(), Is.False);
+        });
+
+        var patchResponse = await _client.PatchAsJsonAsync($"/api/replenishment/rules/{rule.GetProperty("id").GetGuid()}", new
+        {
+            desiredAmount = 5m,
+            desiredUnit = "pouch"
+        });
+        Assert.That(patchResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+
+        rule = await GetRuleForItem(itemId);
+        Assert.Multiple(() =>
+        {
+            Assert.That(rule.GetProperty("desiredAmount").GetDecimal(), Is.EqualTo(5m));
+            Assert.That(rule.GetProperty("desiredUnit").GetString(), Is.EqualTo("pouch"));
+        });
+
+        var suggestions = JsonSerializer.Deserialize<JsonElement>(await (await _client.GetAsync("/api/replenishment/suggestions")).Content.ReadAsStringAsync())
+            .EnumerateArray().ToList();
+        var suggestion = suggestions.Single(x => x.GetProperty("itemDefinitionId").GetGuid() == itemId);
+        Assert.Multiple(() =>
+        {
+            Assert.That(suggestion.GetProperty("requiredAmount").GetDecimal(), Is.EqualTo(5m));
+            Assert.That(suggestion.GetProperty("unit").GetString(), Is.EqualTo("pouch"));
+        });
+    }
+
+    [Test]
+    public async Task Disabled_replenishment_rule_does_not_return_suggestion()
+    {
+        var itemResponse = await _client.PostAsJsonAsync("/api/item-definitions", new { name = "Crackers", kind = ItemKind.Consumable, desiredAmount = 2m, desiredUnit = "box" });
+        Assert.That(itemResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        var item = JsonSerializer.Deserialize<JsonElement>(await itemResponse.Content.ReadAsStringAsync());
+        var itemId = item.GetProperty("id").GetGuid();
+
+        var rule = await GetRuleForItem(itemId);
+        var patchResponse = await _client.PatchAsJsonAsync($"/api/replenishment/rules/{rule.GetProperty("id").GetGuid()}", new { isDisabled = true });
+        Assert.That(patchResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+
+        var suggestions = JsonSerializer.Deserialize<JsonElement>(await (await _client.GetAsync("/api/replenishment/suggestions")).Content.ReadAsStringAsync())
+            .EnumerateArray().ToList();
+
+        Assert.That(suggestions.Any(x => x.GetProperty("itemDefinitionId").GetGuid() == itemId), Is.False);
+    }
+
+    [Test]
+    public async Task Expiry_warning_days_controls_backend_expiry_lookahead()
+    {
+        var (itemId, entryId) = await CreateItemAndEntry("Tahini", 2m, "jar");
+        var expiresOn = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(4));
+        var lotResponse = await _client.PostAsJsonAsync("/api/inventory-lots", new { inventoryEntryId = entryId, quantity = 1m, unit = "jar", expiresOn, storageSlotId = (Guid?)null });
+        Assert.That(lotResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        var lot = JsonSerializer.Deserialize<JsonElement>(await lotResponse.Content.ReadAsStringAsync());
+        var lotId = lot.GetProperty("id").GetGuid();
+
+        var rule = await GetRuleForItem(itemId);
+        var patchResponse = await _client.PatchAsJsonAsync($"/api/replenishment/rules/{rule.GetProperty("id").GetGuid()}", new { expiryWarningDays = 5 });
+        Assert.That(patchResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+
+        var suggestions = JsonSerializer.Deserialize<JsonElement>(await (await _client.GetAsync("/api/replenishment/suggestions")).Content.ReadAsStringAsync())
+            .EnumerateArray().ToList();
+        var suggestionLot = suggestions.Single(x => x.GetProperty("itemDefinitionId").GetGuid() == itemId)
+            .GetProperty("lots").EnumerateArray().Single();
+
+        var expiringLot = JsonSerializer.Deserialize<JsonElement>(await (await _client.GetAsync("/api/inventory/expiring")).Content.ReadAsStringAsync())
+            .EnumerateArray().Single(x => x.GetProperty("lotId").GetGuid() == lotId);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(suggestionLot.GetProperty("expiryStatus").GetString(), Is.EqualTo("Urgent"));
+            Assert.That(expiringLot.GetProperty("expiryStatus").GetString(), Is.EqualTo("Urgent"));
+        });
+    }
+
+    [Test]
     public async Task Legacy_replenishment_route_remains_available()
     {
         var response = await _client.GetAsync("/replenishment/suggestions");
@@ -185,9 +273,9 @@ public class SmokeTests
         Assert.That(patched.GetProperty("isPurchased").GetBoolean(), Is.True);
     }
 
-    private async Task<(Guid itemId, Guid entryId)> CreateItemAndEntry(string name)
+    private async Task<(Guid itemId, Guid entryId)> CreateItemAndEntry(string name, decimal? desiredAmount = null, string? desiredUnit = null)
     {
-        var itemResponse = await _client.PostAsJsonAsync("/api/item-definitions", new { name, kind = ItemKind.Consumable });
+        var itemResponse = await _client.PostAsJsonAsync("/api/item-definitions", new { name, kind = ItemKind.Consumable, desiredAmount, desiredUnit });
         Assert.That(itemResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
         var item = JsonSerializer.Deserialize<JsonElement>(await itemResponse.Content.ReadAsStringAsync());
         var itemId = item.GetProperty("id").GetGuid();
@@ -197,5 +285,12 @@ public class SmokeTests
         var entry = JsonSerializer.Deserialize<JsonElement>(await entryResponse.Content.ReadAsStringAsync());
 
         return (itemId, entry.GetProperty("id").GetGuid());
+    }
+
+    private async Task<JsonElement> GetRuleForItem(Guid itemId)
+    {
+        var rules = JsonSerializer.Deserialize<JsonElement>(await (await _client.GetAsync("/api/replenishment/rules")).Content.ReadAsStringAsync())
+            .EnumerateArray().ToList();
+        return rules.Single(x => x.GetProperty("itemDefinitionId").GetGuid() == itemId);
     }
 }

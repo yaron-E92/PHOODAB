@@ -10,7 +10,7 @@ public sealed record InventoryLotReadModel(
     int? ExpiresInDays,
     string ExpiryStatus)
 {
-    public static InventoryLotReadModel From(InventoryLot lot, DateOnly todayUtc)
+    public static InventoryLotReadModel From(InventoryLot lot, DateOnly todayUtc, int expiryWarningDays = 2)
     {
         int? expiresInDays = lot.ExpiresOn is null ? null : lot.ExpiresOn.Value.DayNumber - todayUtc.DayNumber;
         return new InventoryLotReadModel(
@@ -19,6 +19,6 @@ public sealed record InventoryLotReadModel(
             lot.Unit.Value,
             lot.ExpiresOn,
             expiresInDays,
-            InventoryLotExpiryCalculator.GetExpiryStatus(expiresInDays));
+            InventoryLotExpiryCalculator.GetExpiryStatus(expiresInDays, expiryWarningDays));
     }
 }

@@ -34,7 +34,7 @@ public sealed class ReplenishmentSuggestionService
             }
 
             var requiredAmount = Math.Max(0, rule.TargetAmount.Value - currentAndValid.currentAmount);
-            var lots = entry?.Lots.Select(lot => InventoryLotReadModel.From(lot, todayUtc)).ToList() ?? new List<InventoryLotReadModel>();
+            var lots = entry?.Lots.Select(lot => InventoryLotReadModel.From(lot, todayUtc, rule.ExpiryWarningDays)).ToList() ?? new List<InventoryLotReadModel>();
             results.Add(new ReplenishmentSuggestionReadModel(
                 rule.ItemDefinitionId,
                 entry?.ItemDefinition.Name ?? "Unknown Item",

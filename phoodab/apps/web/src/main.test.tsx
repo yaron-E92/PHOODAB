@@ -8,8 +8,13 @@ const getVersionMock = vi.fn().mockResolvedValue({ version: 'test' });
 const getInventorySummaryMock = vi.fn();
 const getExpiringLotsMock = vi.fn();
 const getReplenishmentSuggestionsMock = vi.fn();
+const getReplenishmentRulesMock = vi.fn();
+const getShoppingListItemsMock = vi.fn();
 const createConsumableItemMock = vi.fn().mockResolvedValue({ id: 'item-1', name: 'Milk', kind: 'Consumable' });
 const addInventoryLotMock = vi.fn();
+const createShoppingListItemFromSuggestionMock = vi.fn();
+const updateShoppingListItemStatusMock = vi.fn();
+const updateReplenishmentRuleMock = vi.fn();
 
 vi.mock('../../../packages/api-client/src/client', () => ({
   getHealth: getHealthMock,
@@ -17,8 +22,13 @@ vi.mock('../../../packages/api-client/src/client', () => ({
   getInventorySummary: getInventorySummaryMock,
   getExpiringLots: getExpiringLotsMock,
   getReplenishmentSuggestions: getReplenishmentSuggestionsMock,
+  getReplenishmentRules: getReplenishmentRulesMock,
+  getShoppingListItems: getShoppingListItemsMock,
   createConsumableItem: createConsumableItemMock,
-  addInventoryLot: addInventoryLotMock
+  addInventoryLot: addInventoryLotMock,
+  createShoppingListItemFromSuggestion: createShoppingListItemFromSuggestionMock,
+  updateShoppingListItemStatus: updateShoppingListItemStatusMock,
+  updateReplenishmentRule: updateReplenishmentRuleMock
 }));
 
 vi.mock('react-dom/client', async () => {
@@ -36,6 +46,8 @@ describe('pantry mvp page', () => {
     getInventorySummaryMock.mockResolvedValue([]);
     getExpiringLotsMock.mockResolvedValue([]);
     getReplenishmentSuggestionsMock.mockResolvedValue([]);
+    getReplenishmentRulesMock.mockResolvedValue([]);
+    getShoppingListItemsMock.mockResolvedValue([]);
   });
 
   it('shows loading then empty states', async () => {

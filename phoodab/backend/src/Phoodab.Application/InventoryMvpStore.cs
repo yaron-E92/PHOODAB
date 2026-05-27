@@ -126,8 +126,12 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
         {
             var state = LoadState();
             return [.. state.InventoryLots
-                .Select(l => new InventoryLot(l.Id, l.ItemDefinitionId, Quantity.From(l.Quantity), new Unit(l.Unit), l.ExpiresOn, l.StorageSlotId))
-                .Select(lot => InventoryLotReadModel.From(lot, todayUtc))
+                .Select(l =>
+                {
+                    var lot = new InventoryLot(l.Id, l.ItemDefinitionId, Quantity.From(l.Quantity), new Unit(l.Unit), l.ExpiresOn, l.StorageSlotId);
+                    var expiryWarningDays = state.Rules.SingleOrDefault(r => r.ItemDefinitionId == l.ItemDefinitionId)?.ExpiryWarningDays ?? 2;
+                    return InventoryLotReadModel.From(lot, todayUtc, expiryWarningDays);
+                })
                 .Where(lot => lot.ExpiryStatus is "Expired" or "Urgent" or "Soon")];
         }
     }

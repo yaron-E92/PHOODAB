@@ -30,4 +30,58 @@ export interface paths {
       };
     };
   };
+  '/api/replenishment/rules': {
+    get: {
+      responses: {
+        200: {
+          content: {
+            'application/json': components['schemas']['ReplenishmentRule'][];
+          };
+        };
+      };
+    };
+  };
+  '/api/replenishment/rules/{ruleId}': {
+    patch: {
+      parameters: {
+        path: {
+          ruleId: string;
+        };
+      };
+      requestBody: {
+        content: {
+          'application/json': components['schemas']['UpdateReplenishmentRuleRequest'];
+        };
+      };
+      responses: {
+        200: {
+          content: {
+            'application/json': components['schemas']['ReplenishmentRule'];
+          };
+        };
+        404: {
+          content: never;
+        };
+      };
+    };
+  };
+}
+
+export interface components {
+  schemas: {
+    ReplenishmentRule: {
+      id: string;
+      itemDefinitionId: string;
+      desiredAmount: number;
+      desiredUnit: string;
+      expiryWarningDays: number;
+      isDisabled: boolean;
+    };
+    UpdateReplenishmentRuleRequest: {
+      desiredAmount?: number | null;
+      desiredUnit?: string | null;
+      isDisabled?: boolean | null;
+      expiryWarningDays?: number | null;
+    };
+  };
 }

@@ -2,6 +2,8 @@ import type { paths } from './generated';
 
 type HealthResponse = paths['/health']['get']['responses']['200']['content']['application/json'];
 type VersionResponse = paths['/version']['get']['responses']['200']['content']['application/json'];
+type ReplenishmentRulesResponse = paths['/api/replenishment/rules']['get']['responses']['200']['content']['application/json'];
+type UpdateReplenishmentRuleRequest = paths['/api/replenishment/rules/{ruleId}']['patch']['requestBody']['content']['application/json'];
 
 export type ItemDefinition = {
   id: string;
@@ -50,14 +52,7 @@ export type ReplenishmentSuggestion = {
   }[];
 };
 
-export type ReplenishmentRule = {
-  id: string;
-  itemDefinitionId: string;
-  desiredAmount: number;
-  desiredUnit: string;
-  expiryWarningDays: number;
-  isDisabled: boolean;
-};
+export type ReplenishmentRule = ReplenishmentRulesResponse[number];
 
 export type ShoppingListItem = {
   id: string;
@@ -171,7 +166,7 @@ export async function getReplenishmentRules(baseUrl: string): Promise<Replenishm
 export async function updateReplenishmentRule(
   baseUrl: string,
   ruleId: string,
-  payload: { desiredAmount?: number; desiredUnit?: string; expiryWarningDays?: number; isDisabled?: boolean }
+  payload: UpdateReplenishmentRuleRequest
 ): Promise<ReplenishmentRule> {
   const response = await fetch(`${baseUrl}/api/replenishment/rules/${ruleId}`, {
     method: 'PATCH',
