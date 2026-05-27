@@ -13,10 +13,11 @@ public sealed class ReplenishmentSuggestionService
 
     public IReadOnlyList<ReplenishmentSuggestionReadModel> GetSuggestions(
         IEnumerable<ReplenishmentRule> rules,
-        IEnumerable<InventoryEntry> inventoryEntries)
+        IEnumerable<ConsumableEntry> consumableEntries)
     {
         var todayUtc = _utcDateProvider.TodayUtc;
-        var entriesByItem = inventoryEntries.ToDictionary(e => e.ItemDefinitionId);
+        var entriesByItem = consumableEntries.GroupBy(e => e.ItemDefinitionId)
+            .ToDictionary(group => group.Key, group => group.ToList());
         var results = new List<ReplenishmentSuggestionReadModel>();
 
         foreach (var rule in rules)
@@ -26,41 +27,41 @@ public sealed class ReplenishmentSuggestionService
                 continue;
             }
 
-            entriesByItem.TryGetValue(rule.ItemDefinitionId, out var entry);
-            var currentAndValid = GetCurrentAmount(entry, rule.Unit);
+            entriesByItem.TryGetValue(rule.ItemDefinitionId, out var entries);
+            var currentAndValid = GetCurrentAmount(entries, rule.Unit);
             if (!currentAndValid.isValid)
             {
                 continue;
             }
 
             var requiredAmount = Math.Max(0, rule.TargetAmount.Value - currentAndValid.currentAmount);
-            var lots = entry?.Lots.Select(lot => InventoryLotReadModel.From(lot, todayUtc)).ToList() ?? new List<InventoryLotReadModel>();
+            var readModels = entries?.Select(entry => ConsumableEntryReadModel.From(entry, todayUtc, rule.ExpiryWarningDays)).ToList() ?? new List<ConsumableEntryReadModel>();
             results.Add(new ReplenishmentSuggestionReadModel(
                 rule.ItemDefinitionId,
-                entry?.ItemDefinition.Name ?? "Unknown Item",
+                entries?.FirstOrDefault()?.ItemDefinition.Name ?? "Unknown Item",
                 currentAndValid.currentAmount,
                 rule.TargetAmount.Value,
                 requiredAmount,
                 rule.Unit.Value,
-                lots));
+                readModels));
         }
 
         return results;
     }
 
-    private static (decimal currentAmount, bool isValid) GetCurrentAmount(InventoryEntry? entry, Unit expectedUnit)
+    private static (decimal currentAmount, bool isValid) GetCurrentAmount(IReadOnlyList<ConsumableEntry>? entries, Unit expectedUnit)
     {
-        if (entry is null)
+        if (entries is null)
         {
             return (0, true);
         }
 
-        if (entry.Lots.Any(lot => !string.Equals(lot.Unit.Value, expectedUnit.Value, StringComparison.OrdinalIgnoreCase)))
+        if (entries.Any(entry => !string.Equals(entry.Unit.Value, expectedUnit.Value, StringComparison.OrdinalIgnoreCase)))
         {
             return (0, false);
         }
 
-        return (entry.Lots.Sum(lot => lot.Quantity.Value), true);
+        return (entries.Sum(entry => entry.Quantity.Value), true);
     }
 
 }

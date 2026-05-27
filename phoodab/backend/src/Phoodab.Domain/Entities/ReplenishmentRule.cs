@@ -15,7 +15,7 @@ public sealed class ReplenishmentRule
         Guid itemDefinitionId,
         Quantity targetAmount,
         Unit unit,
-        int expiryWarningDays = 0,
+        int expiryWarningDays = 2,
         bool isHidden = false,
         bool isDisabled = false)
     {

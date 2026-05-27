@@ -7,23 +7,23 @@ public class InventoryDomainModelsTests
 {
 
     [Test]
-    public void Inventory_entry_and_lot_can_hold_nullable_storage_slot()
+    public void Durable_and_consumable_entries_can_hold_nullable_storage_slot()
     {
         var slotId = Guid.NewGuid();
         var durable = new ItemDefinition(Guid.NewGuid(), "Vacuum", ItemKind.Durable);
         var consumable = new ItemDefinition(Guid.NewGuid(), "Yogurt", ItemKind.Consumable);
 
-        var entryWithSlot = new InventoryEntry(Guid.NewGuid(), durable, slotId);
-        var entryWithoutSlot = new InventoryEntry(Guid.NewGuid(), durable);
-        var lotWithSlot = new InventoryLot(Guid.NewGuid(), consumable.Id, Quantity.From(1), new Unit("cup"), DateOnly.FromDateTime(DateTime.UtcNow), slotId);
-        var lotWithoutSlot = new InventoryLot(Guid.NewGuid(), consumable.Id, Quantity.From(1), new Unit("cup"), null);
+        var durableEntryWithSlot = new DurableEntry(Guid.NewGuid(), durable, slotId);
+        var durableEntryWithoutSlot = new DurableEntry(Guid.NewGuid(), durable);
+        var consumableEntryWithSlot = new ConsumableEntry(Guid.NewGuid(), consumable, Quantity.From(1), new Unit("cup"), DateOnly.FromDateTime(DateTime.UtcNow), slotId);
+        var consumableEntryWithoutSlot = new ConsumableEntry(Guid.NewGuid(), consumable, Quantity.From(1), new Unit("cup"), null);
 
         Assert.Multiple(() =>
         {
-            Assert.That(entryWithSlot.StorageSlotId, Is.EqualTo(slotId));
-            Assert.That(entryWithoutSlot.StorageSlotId, Is.Null);
-            Assert.That(lotWithSlot.StorageSlotId, Is.EqualTo(slotId));
-            Assert.That(lotWithoutSlot.StorageSlotId, Is.Null);
+            Assert.That(durableEntryWithSlot.StorageSlotId, Is.EqualTo(slotId));
+            Assert.That(durableEntryWithoutSlot.StorageSlotId, Is.Null);
+            Assert.That(consumableEntryWithSlot.StorageSlotId, Is.EqualTo(slotId));
+            Assert.That(consumableEntryWithoutSlot.StorageSlotId, Is.Null);
         });
     }
 
@@ -33,29 +33,37 @@ public class InventoryDomainModelsTests
         var durable = new ItemDefinition(Guid.NewGuid(), "Mop", ItemKind.Durable);
         var consumable = new ItemDefinition(Guid.NewGuid(), "Beans", ItemKind.Consumable);
 
-        Assert.Throws<ArgumentException>(() => new InventoryEntry(Guid.NewGuid(), durable, Guid.Empty));
-        Assert.Throws<ArgumentException>(() => new InventoryLot(Guid.NewGuid(), consumable.Id, Quantity.From(1), new Unit("kg"), null, Guid.Empty));
-    }
-    [Test]
-    public void Durable_item_cannot_accept_lots()
-    {
-        var item = new ItemDefinition(Guid.NewGuid(), "Broom", ItemKind.Durable);
-        var entry = new InventoryEntry(Guid.NewGuid(), item);
-        var lot = new InventoryLot(Guid.NewGuid(), item.Id, Quantity.From(1), new Unit("piece"), DateOnly.FromDateTime(DateTime.UtcNow));
-
-        Assert.Throws<InvalidOperationException>(() => entry.AddLot(lot));
+        Assert.Throws<ArgumentException>(() => new DurableEntry(Guid.NewGuid(), durable, Guid.Empty));
+        Assert.Throws<ArgumentException>(() => new ConsumableEntry(Guid.NewGuid(), consumable, Quantity.From(1), new Unit("kg"), null, Guid.Empty));
     }
 
     [Test]
-    public void Consumable_item_can_have_multiple_lots()
+    public void Entry_subclasses_expose_their_item_kind()
     {
-        var item = new ItemDefinition(Guid.NewGuid(), "Milk", ItemKind.Consumable);
-        var entry = new InventoryEntry(Guid.NewGuid(), item);
+        var durable = new ItemDefinition(Guid.NewGuid(), "Broom", ItemKind.Durable);
+        var consumable = new ItemDefinition(Guid.NewGuid(), "Milk", ItemKind.Consumable);
 
-        entry.AddLot(new InventoryLot(Guid.NewGuid(), item.Id, Quantity.From(1), new Unit("liter"), DateOnly.FromDateTime(DateTime.UtcNow).AddDays(2)));
-        entry.AddLot(new InventoryLot(Guid.NewGuid(), item.Id, Quantity.From(2), new Unit("liter"), DateOnly.FromDateTime(DateTime.UtcNow).AddDays(4)));
+        InventoryEntry durableEntry = new DurableEntry(Guid.NewGuid(), durable);
+        InventoryEntry consumableEntry = new ConsumableEntry(Guid.NewGuid(), consumable, Quantity.From(1), new Unit("liter"), DateOnly.FromDateTime(DateTime.UtcNow));
 
-        Assert.That(entry.Lots, Has.Count.EqualTo(2));
+        Assert.Multiple(() =>
+        {
+            Assert.That(durableEntry.Kind, Is.EqualTo(ItemKind.Durable));
+            Assert.That(consumableEntry.Kind, Is.EqualTo(ItemKind.Consumable));
+        });
+    }
+
+    [Test]
+    public void Entry_subclasses_reject_wrong_item_kind()
+    {
+        var durable = new ItemDefinition(Guid.NewGuid(), "Vacuum", ItemKind.Durable);
+        var consumable = new ItemDefinition(Guid.NewGuid(), "Milk", ItemKind.Consumable);
+
+        Assert.Multiple(() =>
+        {
+            Assert.Throws<InvalidOperationException>(() => new DurableEntry(Guid.NewGuid(), consumable));
+            Assert.Throws<InvalidOperationException>(() => new ConsumableEntry(Guid.NewGuid(), durable, Quantity.From(1), new Unit("piece"), null));
+        });
     }
 
     [Test]

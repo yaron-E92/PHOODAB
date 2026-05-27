@@ -13,8 +13,7 @@ public class ReplenishmentSuggestionServiceTests
     public void Understocked_item_returns_positive_required_amount()
     {
         var item = new ItemDefinition(Guid.NewGuid(), "Milk", ItemKind.Consumable);
-        var entry = new InventoryEntry(Guid.NewGuid(), item);
-        entry.AddLot(new InventoryLot(Guid.NewGuid(), item.Id, Quantity.From(1), new Unit("liter"), null));
+        var entry = new ConsumableEntry(Guid.NewGuid(), item, Quantity.From(1), new Unit("liter"), null);
         var rule = new ReplenishmentRule(Guid.NewGuid(), item.Id, Quantity.From(3), new Unit("liter"));
 
         var result = CreateService().GetSuggestions(new[] { rule }, new[] { entry });
@@ -26,12 +25,10 @@ public class ReplenishmentSuggestionServiceTests
     public void Fully_stocked_and_overstocked_items_return_zero_required_amount()
     {
         var fullItem = new ItemDefinition(Guid.NewGuid(), "Beans", ItemKind.Consumable);
-        var fullEntry = new InventoryEntry(Guid.NewGuid(), fullItem);
-        fullEntry.AddLot(new InventoryLot(Guid.NewGuid(), fullItem.Id, Quantity.From(2), new Unit("can"), null));
+        var fullEntry = new ConsumableEntry(Guid.NewGuid(), fullItem, Quantity.From(2), new Unit("can"), null);
 
         var overItem = new ItemDefinition(Guid.NewGuid(), "Rice", ItemKind.Consumable);
-        var overEntry = new InventoryEntry(Guid.NewGuid(), overItem);
-        overEntry.AddLot(new InventoryLot(Guid.NewGuid(), overItem.Id, Quantity.From(5), new Unit("kg"), null));
+        var overEntry = new ConsumableEntry(Guid.NewGuid(), overItem, Quantity.From(5), new Unit("kg"), null);
 
         var suggestions = CreateService().GetSuggestions(
             new[]
@@ -48,7 +45,6 @@ public class ReplenishmentSuggestionServiceTests
     public void Hidden_or_disabled_rules_do_not_produce_suggestions()
     {
         var item = new ItemDefinition(Guid.NewGuid(), "Yogurt", ItemKind.Consumable);
-        var entry = new InventoryEntry(Guid.NewGuid(), item);
 
         var suggestions = CreateService().GetSuggestions(
             new[]
@@ -56,7 +52,7 @@ public class ReplenishmentSuggestionServiceTests
                 new ReplenishmentRule(Guid.NewGuid(), item.Id, Quantity.From(1), new Unit("cup"), isHidden: true),
                 new ReplenishmentRule(Guid.NewGuid(), item.Id, Quantity.From(1), new Unit("cup"), isDisabled: true)
             },
-            new[] { entry });
+            Array.Empty<ConsumableEntry>());
 
         Assert.That(suggestions, Is.Empty);
     }
@@ -77,44 +73,54 @@ public class ReplenishmentSuggestionServiceTests
     [TestCase(3, "Soon")]
     [TestCase(7, "Soon")]
     [TestCase(8, "Safe")]
-    public void Lot_expiry_status_uses_mvp_boundaries(int offsetDays, string expectedStatus)
+    public void Consumable_entry_expiry_status_uses_mvp_boundaries(int offsetDays, string expectedStatus)
     {
         var item = new ItemDefinition(Guid.NewGuid(), "Cheese", ItemKind.Consumable);
-        var entry = new InventoryEntry(Guid.NewGuid(), item);
-        entry.AddLot(new InventoryLot(Guid.NewGuid(), item.Id, Quantity.From(1), new Unit("pack"), Today.AddDays(offsetDays)));
+        var entry = new ConsumableEntry(Guid.NewGuid(), item, Quantity.From(1), new Unit("pack"), Today.AddDays(offsetDays));
         var rule = new ReplenishmentRule(Guid.NewGuid(), item.Id, Quantity.From(2), new Unit("pack"));
 
         var result = CreateService().GetSuggestions(new[] { rule }, new[] { entry });
 
-        Assert.That(result.Single().Lots.Single().ExpiryStatus, Is.EqualTo(expectedStatus));
+        Assert.That(result.Single().Entries.Single().ExpiryStatus, Is.EqualTo(expectedStatus));
+    }
+
+    [TestCase(4, 9, "Soon")]
+    [TestCase(4, 10, "Safe")]
+    public void Consumable_entry_expiry_status_moves_soon_window_with_rule_warning_days(int expiryWarningDays, int offsetDays, string expectedStatus)
+    {
+        var item = new ItemDefinition(Guid.NewGuid(), "Cream", ItemKind.Consumable);
+        var entry = new ConsumableEntry(Guid.NewGuid(), item, Quantity.From(1), new Unit("carton"), Today.AddDays(offsetDays));
+        var rule = new ReplenishmentRule(Guid.NewGuid(), item.Id, Quantity.From(2), new Unit("carton"), expiryWarningDays);
+
+        var result = CreateService().GetSuggestions(new[] { rule }, new[] { entry });
+
+        Assert.That(result.Single().Entries.Single().ExpiryStatus, Is.EqualTo(expectedStatus));
     }
 
     [Test]
-    public void Lot_without_expiry_date_is_unknown()
+    public void Consumable_entry_without_expiry_date_is_unknown()
     {
         var item = new ItemDefinition(Guid.NewGuid(), "Eggs", ItemKind.Consumable);
-        var entry = new InventoryEntry(Guid.NewGuid(), item);
-        entry.AddLot(new InventoryLot(Guid.NewGuid(), item.Id, Quantity.From(1), new Unit("dozen"), null));
+        var entry = new ConsumableEntry(Guid.NewGuid(), item, Quantity.From(1), new Unit("dozen"), null);
         var rule = new ReplenishmentRule(Guid.NewGuid(), item.Id, Quantity.From(2), new Unit("dozen"));
 
-        var lot = CreateService().GetSuggestions(new[] { rule }, new[] { entry }).Single().Lots.Single();
+        var entryReadModel = CreateService().GetSuggestions(new[] { rule }, new[] { entry }).Single().Entries.Single();
 
-        Assert.That(lot.ExpiresInDays, Is.Null);
-        Assert.That(lot.ExpiryStatus, Is.EqualTo("Unknown"));
+        Assert.That(entryReadModel.ExpiresInDays, Is.Null);
+        Assert.That(entryReadModel.ExpiryStatus, Is.EqualTo("Unknown"));
     }
 
     [Test]
-    public void Multiple_lots_for_same_item_have_independent_expiry_status()
+    public void Multiple_consumable_entries_for_same_item_have_independent_expiry_status()
     {
         var item = new ItemDefinition(Guid.NewGuid(), "Yogurt", ItemKind.Consumable);
-        var entry = new InventoryEntry(Guid.NewGuid(), item);
-        entry.AddLot(new InventoryLot(Guid.NewGuid(), item.Id, Quantity.From(1), new Unit("cup"), Today.AddDays(1)));
-        entry.AddLot(new InventoryLot(Guid.NewGuid(), item.Id, Quantity.From(1), new Unit("cup"), Today.AddDays(10)));
+        var entryExpiringSoon = new ConsumableEntry(Guid.NewGuid(), item, Quantity.From(1), new Unit("cup"), Today.AddDays(1));
+        var entrySafe = new ConsumableEntry(Guid.NewGuid(), item, Quantity.From(1), new Unit("cup"), Today.AddDays(10));
         var rule = new ReplenishmentRule(Guid.NewGuid(), item.Id, Quantity.From(3), new Unit("cup"));
 
-        var lots = CreateService().GetSuggestions(new[] { rule }, new[] { entry }).Single().Lots;
+        var entries = CreateService().GetSuggestions(new[] { rule }, new[] { entryExpiringSoon, entrySafe }).Single().Entries;
 
-        Assert.That(lots.Select(l => l.ExpiryStatus), Is.EquivalentTo(new[] { "Urgent", "Safe" }));
+        Assert.That(entries.Select(entry => entry.ExpiryStatus), Is.EquivalentTo(new[] { "Urgent", "Safe" }));
     }
 
     private static ReplenishmentSuggestionService CreateService(DateOnly? today = null)
