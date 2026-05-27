@@ -13,9 +13,9 @@ Expiry is lot-specific and must be deterministic across API and tests.
 - Status thresholds:
   - `Unknown`: no expiry date
   - `Expired`: `< 0`
-  - `Urgent`: `0..2`
-  - `Soon`: `3..7`
-  - `Safe`: `> 7`
+  - `Urgent`: `0..expiryWarningDays`
+  - `Soon`: `(expiryWarningDays + 1)..(expiryWarningDays + 5)`
+  - `Safe`: `> expiryWarningDays + 5`
 
 ## Consequences
 - Avoids local-time ambiguity near midnight.

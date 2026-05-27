@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using Phoodab.Application;
 using Phoodab.Domain;
 using Phoodab.Infrastructure.Eventing;
@@ -36,16 +37,18 @@ app.UseCors("FrontendDev");
 app.UseSwagger();
 app.UseSwaggerUI();
 
-app.MapGet("/health", () => Results.Ok(new { status = "ok" }))
+app.MapGet("/health", () => Results.Ok(new HealthResponse("ok")))
     .WithName("GetHealth")
+    .Produces<HealthResponse>(StatusCodes.Status200OK)
     .WithOpenApi();
 
 app.MapGet("/version", () =>
 {
     var version = typeof(Program).Assembly.GetName().Version?.ToString() ?? "0.0.0";
-    return Results.Ok(new { version });
+    return Results.Ok(new VersionResponse(version));
 })
 .WithName("GetVersion")
+.Produces<VersionResponse>(StatusCodes.Status200OK)
 .WithOpenApi();
 
 app.MapPost("/api/item-definitions", (CreateItemDefinitionRequest request, IInventoryMvpStore store) =>
@@ -81,32 +84,21 @@ app.MapGet("/api/replenishment/suggestions", (ReplenishmentSuggestionService sug
 
 app.MapGet("/api/replenishment/rules", (IInventoryMvpStore store) =>
 {
-    var rules = store.GetRules().Select(rule => new
-    {
-        id = rule.Id,
-        itemDefinitionId = rule.ItemDefinitionId,
-        desiredAmount = rule.TargetAmount.Value,
-        desiredUnit = rule.Unit.Value,
-        expiryWarningDays = rule.ExpiryWarningDays,
-        isDisabled = rule.IsDisabled
-    });
+    var rules = store.GetRules().Select(ToReplenishmentRuleResponse);
     return Results.Ok(rules);
-}).WithOpenApi();
+})
+.Produces<IEnumerable<ReplenishmentRuleResponse>>(StatusCodes.Status200OK)
+.WithOpenApi();
 
 app.MapPatch("/api/replenishment/rules/{ruleId:guid}", (Guid ruleId, UpdateReplenishmentRuleRequest request, IInventoryMvpStore store) =>
 {
     var updated = store.UpdateRule(ruleId, request.DesiredAmount, request.DesiredUnit, request.IsDisabled, request.ExpiryWarningDays);
     if (updated is null) return Results.NotFound();
-    return Results.Ok(new
-    {
-        id = updated.Id,
-        itemDefinitionId = updated.ItemDefinitionId,
-        desiredAmount = updated.TargetAmount.Value,
-        desiredUnit = updated.Unit.Value,
-        expiryWarningDays = updated.ExpiryWarningDays,
-        isDisabled = updated.IsDisabled
-    });
-}).WithOpenApi();
+    return Results.Ok(ToReplenishmentRuleResponse(updated));
+})
+.Produces<ReplenishmentRuleResponse>(StatusCodes.Status200OK)
+.Produces(StatusCodes.Status404NotFound)
+.WithOpenApi();
 
 app.MapPost("/api/shopping-list-items/from-suggestion", (CreateShoppingListItemFromSuggestionRequest request, IInventoryMvpStore store) =>
 {
@@ -130,13 +122,33 @@ app.MapGet("/replenishment/suggestions", (ReplenishmentSuggestionService suggest
 .WithName("GetReplenishmentSuggestionsLegacy")
 .WithOpenApi();
 
+static ReplenishmentRuleResponse ToReplenishmentRuleResponse(ReplenishmentRule rule)
+{
+    return new ReplenishmentRuleResponse(
+        rule.Id,
+        rule.ItemDefinitionId,
+        rule.TargetAmount.Value,
+        rule.Unit.Value,
+        rule.ExpiryWarningDays,
+        rule.IsDisabled);
+}
+
 app.Run();
 
+public sealed record HealthResponse([property: Required] string Status);
+public sealed record VersionResponse([property: Required] string Version);
 public sealed record CreateItemDefinitionRequest(string Name, ItemKind Kind, decimal? DesiredAmount, string? DesiredUnit);
 public sealed record CreateInventoryEntryRequest(Guid ItemDefinitionId, Guid? StorageSlotId);
 public sealed record CreateInventoryLotRequest(Guid InventoryEntryId, decimal Quantity, string Unit, DateOnly? ExpiresOn, Guid? StorageSlotId);
 public sealed record CreateShoppingListItemFromSuggestionRequest(Guid ItemDefinitionId, decimal Quantity, string Unit);
 public sealed record UpdateShoppingListItemStatusRequest(bool? IsResolved, bool? IsPurchased);
 public sealed record UpdateReplenishmentRuleRequest(decimal? DesiredAmount, string? DesiredUnit, bool? IsDisabled, int? ExpiryWarningDays);
+public sealed record ReplenishmentRuleResponse(
+    [property: Required] Guid Id,
+    [property: Required] Guid ItemDefinitionId,
+    [property: Required] decimal DesiredAmount,
+    [property: Required] string DesiredUnit,
+    [property: Required] int ExpiryWarningDays,
+    [property: Required] bool IsDisabled);
 
 public partial class Program { }

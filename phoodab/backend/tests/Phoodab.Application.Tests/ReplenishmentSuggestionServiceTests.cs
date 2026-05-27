@@ -89,6 +89,20 @@ public class ReplenishmentSuggestionServiceTests
         Assert.That(result.Single().Lots.Single().ExpiryStatus, Is.EqualTo(expectedStatus));
     }
 
+    [TestCase(4, 9, "Soon")]
+    [TestCase(4, 10, "Safe")]
+    public void Lot_expiry_status_moves_soon_window_with_rule_warning_days(int expiryWarningDays, int offsetDays, string expectedStatus)
+    {
+        var item = new ItemDefinition(Guid.NewGuid(), "Cream", ItemKind.Consumable);
+        var entry = new InventoryEntry(Guid.NewGuid(), item);
+        entry.AddLot(new InventoryLot(Guid.NewGuid(), item.Id, Quantity.From(1), new Unit("carton"), Today.AddDays(offsetDays)));
+        var rule = new ReplenishmentRule(Guid.NewGuid(), item.Id, Quantity.From(2), new Unit("carton"), expiryWarningDays);
+
+        var result = CreateService().GetSuggestions(new[] { rule }, new[] { entry });
+
+        Assert.That(result.Single().Lots.Single().ExpiryStatus, Is.EqualTo(expectedStatus));
+    }
+
     [Test]
     public void Lot_without_expiry_date_is_unknown()
     {

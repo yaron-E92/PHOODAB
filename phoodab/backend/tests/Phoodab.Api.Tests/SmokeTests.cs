@@ -76,6 +76,84 @@ public class SmokeTests
     }
 
     [Test]
+    public async Task OpenApi_Replenishment_Rules_Expose_Generated_Client_Schemas()
+    {
+        var response = await _client.GetAsync("/swagger/v1/swagger.json");
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+
+        var swagger = JsonSerializer.Deserialize<JsonElement>(await response.Content.ReadAsStringAsync());
+        var paths = swagger.GetProperty("paths");
+        var schemas = swagger.GetProperty("components").GetProperty("schemas");
+
+        var healthResponseSchema = paths.GetProperty("/health").GetProperty("get")
+            .GetProperty("responses").GetProperty("200")
+            .GetProperty("content").GetProperty("application/json")
+            .GetProperty("schema");
+        var healthSchema = ResolveSchema(schemas, healthResponseSchema);
+        AssertSchemaHasProperties(healthSchema, "status");
+        AssertSchemaRequiresProperties(healthSchema, "status");
+
+        var versionResponseSchema = paths.GetProperty("/version").GetProperty("get")
+            .GetProperty("responses").GetProperty("200")
+            .GetProperty("content").GetProperty("application/json")
+            .GetProperty("schema");
+        var versionSchema = ResolveSchema(schemas, versionResponseSchema);
+        AssertSchemaHasProperties(versionSchema, "version");
+        AssertSchemaRequiresProperties(versionSchema, "version");
+
+        var rulesPath = paths.GetProperty("/api/replenishment/rules");
+        var rulesResponseSchema = rulesPath.GetProperty("get")
+            .GetProperty("responses").GetProperty("200")
+            .GetProperty("content").GetProperty("application/json")
+            .GetProperty("schema");
+        Assert.That(rulesResponseSchema.GetProperty("type").GetString(), Is.EqualTo("array"));
+        var ruleResponseSchema = ResolveSchema(schemas, rulesResponseSchema.GetProperty("items"));
+        AssertSchemaHasProperties(ruleResponseSchema,
+            "id",
+            "itemDefinitionId",
+            "desiredAmount",
+            "desiredUnit",
+            "expiryWarningDays",
+            "isDisabled");
+        AssertSchemaRequiresProperties(ruleResponseSchema,
+            "id",
+            "itemDefinitionId",
+            "desiredAmount",
+            "desiredUnit",
+            "expiryWarningDays",
+            "isDisabled");
+
+        var rulePatch = paths.GetProperty("/api/replenishment/rules/{ruleId}").GetProperty("patch");
+        var patchRequestSchema = rulePatch.GetProperty("requestBody")
+            .GetProperty("content").GetProperty("application/json")
+            .GetProperty("schema");
+        AssertSchemaHasProperties(ResolveSchema(schemas, patchRequestSchema),
+            "desiredAmount",
+            "desiredUnit",
+            "isDisabled",
+            "expiryWarningDays");
+
+        var patchResponseSchema = rulePatch.GetProperty("responses").GetProperty("200")
+            .GetProperty("content").GetProperty("application/json")
+            .GetProperty("schema");
+        ruleResponseSchema = ResolveSchema(schemas, patchResponseSchema);
+        AssertSchemaHasProperties(ruleResponseSchema,
+            "id",
+            "itemDefinitionId",
+            "desiredAmount",
+            "desiredUnit",
+            "expiryWarningDays",
+            "isDisabled");
+        AssertSchemaRequiresProperties(ruleResponseSchema,
+            "id",
+            "itemDefinitionId",
+            "desiredAmount",
+            "desiredUnit",
+            "expiryWarningDays",
+            "isDisabled");
+    }
+
+    [Test]
     public async Task Development_seed_data_contains_demo_stock_and_expiry_mix()
     {
         var suggestions = JsonSerializer.Deserialize<JsonElement>(await (await _client.GetAsync("/api/replenishment/suggestions")).Content.ReadAsStringAsync())
@@ -292,5 +370,38 @@ public class SmokeTests
         var rules = JsonSerializer.Deserialize<JsonElement>(await (await _client.GetAsync("/api/replenishment/rules")).Content.ReadAsStringAsync())
             .EnumerateArray().ToList();
         return rules.Single(x => x.GetProperty("itemDefinitionId").GetGuid() == itemId);
+    }
+
+    private static JsonElement ResolveSchema(JsonElement schemas, JsonElement schema)
+    {
+        return schema.TryGetProperty("$ref", out var schemaReference)
+            ? schemas.GetProperty(schemaReference.GetString()!.Split('/').Last())
+            : schema;
+    }
+
+    private static void AssertSchemaHasProperties(JsonElement schema, params string[] properties)
+    {
+        var schemaProperties = schema.GetProperty("properties");
+        Assert.Multiple(() =>
+        {
+            foreach (var property in properties)
+            {
+                Assert.That(schemaProperties.TryGetProperty(property, out _), Is.True, $"Missing schema property {property}");
+            }
+        });
+    }
+
+    private static void AssertSchemaRequiresProperties(JsonElement schema, params string[] properties)
+    {
+        var requiredProperties = schema.GetProperty("required").EnumerateArray()
+            .Select(property => property.GetString())
+            .ToHashSet();
+        Assert.Multiple(() =>
+        {
+            foreach (var property in properties)
+            {
+                Assert.That(requiredProperties.Contains(property), Is.True, $"Schema property {property} is not required");
+            }
+        });
     }
 }
