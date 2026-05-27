@@ -5,7 +5,7 @@ namespace Phoodab.Application;
 public interface IReplenishmentReadData
 {
     IReadOnlyList<ReplenishmentRule> GetRules();
-    IReadOnlyList<InventoryEntry> GetInventoryEntries();
+    IReadOnlyList<ConsumableEntry> GetConsumableEntries();
 }
 
 public sealed class InMemoryReplenishmentReadData : IReplenishmentReadData
@@ -26,22 +26,17 @@ public sealed class InMemoryReplenishmentReadData : IReplenishmentReadData
         };
     }
 
-    public IReadOnlyList<InventoryEntry> GetInventoryEntries()
+    public IReadOnlyList<ConsumableEntry> GetConsumableEntries()
     {
         var milk = new ItemDefinition(Guid.Parse("11111111-1111-1111-1111-111111111111"), "Milk", ItemKind.Consumable);
         var beans = new ItemDefinition(Guid.Parse("22222222-2222-2222-2222-222222222222"), "Beans", ItemKind.Consumable);
         var rice = new ItemDefinition(Guid.Parse("33333333-3333-3333-3333-333333333333"), "Rice", ItemKind.Consumable);
 
-        var milkEntry = new InventoryEntry(Guid.NewGuid(), milk);
-        milkEntry.AddLot(new InventoryLot(Guid.NewGuid(), milk.Id, Quantity.From(1), new Unit("liter"), null));
+        var milkEntry = new ConsumableEntry(Guid.NewGuid(), milk, Quantity.From(1), new Unit("liter"), null);
+        var beansEntry = new ConsumableEntry(Guid.NewGuid(), beans, Quantity.From(2), new Unit("can"), null);
+        var riceKgEntry = new ConsumableEntry(Guid.NewGuid(), rice, Quantity.From(1), new Unit("kg"), null);
+        var riceBagEntry = new ConsumableEntry(Guid.NewGuid(), rice, Quantity.From(1), new Unit("bag"), null);
 
-        var beansEntry = new InventoryEntry(Guid.NewGuid(), beans);
-        beansEntry.AddLot(new InventoryLot(Guid.NewGuid(), beans.Id, Quantity.From(2), new Unit("can"), null));
-
-        var riceEntry = new InventoryEntry(Guid.NewGuid(), rice);
-        riceEntry.AddLot(new InventoryLot(Guid.NewGuid(), rice.Id, Quantity.From(1), new Unit("kg"), null));
-        riceEntry.AddLot(new InventoryLot(Guid.NewGuid(), rice.Id, Quantity.From(1), new Unit("bag"), null));
-
-        return new List<InventoryEntry> { milkEntry, beansEntry, riceEntry };
+        return new List<ConsumableEntry> { milkEntry, beansEntry, riceKgEntry, riceBagEntry };
     }
 }

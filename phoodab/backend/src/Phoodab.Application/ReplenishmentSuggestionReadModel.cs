@@ -7,4 +7,4 @@ public sealed record ReplenishmentSuggestionReadModel(
     decimal DesiredQuantity,
     decimal RequiredAmount,
     string Unit,
-    IReadOnlyList<InventoryLotReadModel> Lots);
+    IReadOnlyList<ConsumableEntryReadModel> Entries);

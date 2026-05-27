@@ -1,13 +1,13 @@
-# ADR-002: Lot expiry status uses UTC date-only policy
+# ADR-002: Consumable entry expiry status uses UTC date-only policy
 
 ## Status
 Accepted
 
 ## Context
-Expiry is lot-specific and must be deterministic across API and tests.
+Expiry is consumable-entry-specific and must be deterministic across API and tests.
 
 ## Decision
-- Expiry status is computed in backend application logic per lot.
+- Expiry status is computed in backend application logic per consumable entry.
 - The current date source is injectable and read as UTC date-only (`DateOnly` from `DateTime.UtcNow`).
 - `ExpiresInDays = expiryDate.DayNumber - todayUtc.DayNumber`.
 - Status thresholds:
@@ -20,4 +20,4 @@ Expiry is lot-specific and must be deterministic across API and tests.
 ## Consequences
 - Avoids local-time ambiguity near midnight.
 - Keeps frontend presentation-only; no expiry classification in React.
-- Ensures multiple lots of same item can have independent statuses.
+- Ensures multiple consumable entries of same item can have independent statuses.

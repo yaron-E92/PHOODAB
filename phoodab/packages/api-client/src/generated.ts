@@ -73,7 +73,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/inventory-entries": {
+    "/api/durable-entries": {
         parameters: {
             query?: never;
             header?: never;
@@ -91,7 +91,7 @@ export interface paths {
             };
             requestBody: {
                 content: {
-                    "application/json": components["schemas"]["CreateInventoryEntryRequest"];
+                    "application/json": components["schemas"]["CreateDurableEntryRequest"];
                 };
             };
             responses: {
@@ -110,7 +110,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/inventory-lots": {
+    "/api/consumable-entries": {
         parameters: {
             query?: never;
             header?: never;
@@ -128,7 +128,7 @@ export interface paths {
             };
             requestBody: {
                 content: {
-                    "application/json": components["schemas"]["CreateInventoryLotRequest"];
+                    "application/json": components["schemas"]["CreateConsumableEntryRequest"];
                 };
             };
             responses: {
@@ -180,7 +180,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/inventory/expiring": {
+    "/api/consumable-entries/expiring": {
         parameters: {
             query?: never;
             header?: never;
@@ -441,15 +441,15 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        CreateInventoryEntryRequest: {
+        CreateDurableEntryRequest: {
             /** Format: uuid */
             itemDefinitionId?: string;
             /** Format: uuid */
             storageSlotId?: string | null;
         };
-        CreateInventoryLotRequest: {
+        CreateConsumableEntryRequest: {
             /** Format: uuid */
-            inventoryEntryId?: string;
+            itemDefinitionId?: string;
             /** Format: double */
             quantity?: number;
             unit?: string | null;

@@ -6,12 +6,12 @@ import { createRoot } from 'react-dom/client';
 const getHealthMock = vi.fn().mockResolvedValue({ status: 'ok' });
 const getVersionMock = vi.fn().mockResolvedValue({ version: 'test' });
 const getInventorySummaryMock = vi.fn();
-const getExpiringLotsMock = vi.fn();
+const getExpiringConsumableEntriesMock = vi.fn();
 const getReplenishmentSuggestionsMock = vi.fn();
 const getReplenishmentRulesMock = vi.fn();
 const getShoppingListItemsMock = vi.fn();
 const createConsumableItemMock = vi.fn().mockResolvedValue({ id: 'item-1', name: 'Milk', kind: 'Consumable' });
-const addInventoryLotMock = vi.fn();
+const addConsumableEntryMock = vi.fn();
 const createShoppingListItemFromSuggestionMock = vi.fn();
 const updateShoppingListItemStatusMock = vi.fn();
 const updateReplenishmentRuleMock = vi.fn();
@@ -20,12 +20,12 @@ vi.mock('../../../packages/api-client/src/client', () => ({
   getHealth: getHealthMock,
   getVersion: getVersionMock,
   getInventorySummary: getInventorySummaryMock,
-  getExpiringLots: getExpiringLotsMock,
+  getExpiringConsumableEntries: getExpiringConsumableEntriesMock,
   getReplenishmentSuggestions: getReplenishmentSuggestionsMock,
   getReplenishmentRules: getReplenishmentRulesMock,
   getShoppingListItems: getShoppingListItemsMock,
   createConsumableItem: createConsumableItemMock,
-  addInventoryLot: addInventoryLotMock,
+  addConsumableEntry: addConsumableEntryMock,
   createShoppingListItemFromSuggestion: createShoppingListItemFromSuggestionMock,
   updateShoppingListItemStatus: updateShoppingListItemStatusMock,
   updateReplenishmentRule: updateReplenishmentRuleMock
@@ -44,7 +44,7 @@ describe('pantry mvp page', () => {
     vi.clearAllMocks();
     document.body.innerHTML = '<div id="root"></div>';
     getInventorySummaryMock.mockResolvedValue([]);
-    getExpiringLotsMock.mockResolvedValue([]);
+    getExpiringConsumableEntriesMock.mockResolvedValue([]);
     getReplenishmentSuggestionsMock.mockResolvedValue([]);
     getReplenishmentRulesMock.mockResolvedValue([]);
     getShoppingListItemsMock.mockResolvedValue([]);
@@ -62,24 +62,23 @@ describe('pantry mvp page', () => {
     });
 
     expect(container.textContent).toContain('No inventory yet.');
-    expect(container.textContent).toContain('No expiring lots.');
+    expect(container.textContent).toContain('No expiring entries.');
     expect(container.textContent).toContain('No replenishment needed.');
   });
 
   it('renders backend-provided expiryStatus and requiredAmount values', async () => {
     getInventorySummaryMock.mockResolvedValue([
       {
-        inventoryEntryId: 'entry-1',
         itemDefinitionId: 'item-1',
         itemName: 'Milk',
         totalQuantity: 1,
         unit: 'liter',
-        lotCount: 1
+        entryCount: 1
       }
     ]);
-    getExpiringLotsMock.mockResolvedValue([
+    getExpiringConsumableEntriesMock.mockResolvedValue([
       {
-        lotId: 'lot-1',
+        entryId: 'entry-1',
         quantity: 1,
         unit: 'liter',
         expiresOn: '2026-06-01',
@@ -95,7 +94,7 @@ describe('pantry mvp page', () => {
         desiredQuantity: 10,
         currentQuantity: 6,
         unit: 'liter',
-        lots: []
+        entries: []
       }
     ]);
 

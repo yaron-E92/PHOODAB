@@ -6,13 +6,13 @@ namespace Phoodab.Application;
 public interface IInventoryMvpStore
 {
     ItemDefinition CreateItemDefinition(string name, ItemKind kind, decimal? desiredAmount = null, string? desiredUnit = null);
-    InventoryEntry? CreateInventoryEntry(Guid itemDefinitionId, Guid? storageSlotId);
-    InventoryLot? AddInventoryLot(Guid inventoryEntryId, decimal quantity, string unit, DateOnly? expiresOn, Guid? storageSlotId);
+    DurableEntry? CreateDurableEntry(Guid itemDefinitionId, Guid? storageSlotId);
+    ConsumableEntry? AddConsumableEntry(Guid itemDefinitionId, decimal quantity, string unit, DateOnly? expiresOn, Guid? storageSlotId);
     IReadOnlyList<object> GetSummary();
-    IReadOnlyList<InventoryLotReadModel> GetExpiringLots(DateOnly todayUtc);
+    IReadOnlyList<ConsumableEntryReadModel> GetExpiringConsumableEntries(DateOnly todayUtc);
     IReadOnlyList<ReplenishmentRule> GetRules();
     ReplenishmentRule? UpdateRule(Guid ruleId, decimal? desiredAmount, string? desiredUnit, bool? isDisabled, int? expiryWarningDays);
-    IReadOnlyList<InventoryEntry> GetInventoryEntries();
+    IReadOnlyList<ConsumableEntry> GetConsumableEntries();
     void EnsureDevelopmentSeedData(DateOnly todayUtc);
     object CreateOrUpdateShoppingListItemFromSuggestion(Guid itemDefinitionId, decimal quantity, string unit);
     object? UpdateShoppingListItemStatus(Guid shoppingListItemId, bool? isResolved, bool? isPurchased);
@@ -22,6 +22,9 @@ public interface IInventoryMvpStore
 public sealed class FileInventoryMvpStore : IInventoryMvpStore
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private const decimal DefaultDesiredAmount = 2m;
+    private const string DefaultDesiredUnit = "unit";
+    private const int DefaultExpiryWarningDays = 2;
 
     private readonly string _storePath;
     private readonly object _sync = new();
@@ -41,52 +44,51 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
             var state = LoadState();
             var item = new ItemDefinition(Guid.NewGuid(), name, kind);
             state.ItemDefinitions.Add(new ItemDefinitionState(item.Id, item.Name, item.Kind));
-            state.Rules.Add(new ReplenishmentRuleState(Guid.NewGuid(), item.Id, desiredAmount ?? 2m, desiredUnit ?? "unit", 2, false, false));
+            if (item.Kind == ItemKind.Consumable)
+            {
+                state.Rules.Add(CreateDefaultRule(item.Id, desiredAmount, desiredUnit));
+            }
+
             SaveState(state);
             return item;
         }
     }
 
-    public InventoryEntry? CreateInventoryEntry(Guid itemDefinitionId, Guid? storageSlotId)
+    public DurableEntry? CreateDurableEntry(Guid itemDefinitionId, Guid? storageSlotId)
     {
         lock (_sync)
         {
             var state = LoadState();
             var itemState = state.ItemDefinitions.SingleOrDefault(i => i.Id == itemDefinitionId);
-            if (itemState is null)
+            if (itemState is null || itemState.Kind != ItemKind.Durable)
             {
                 return null;
             }
 
             var item = new ItemDefinition(itemState.Id, itemState.Name, itemState.Kind);
-            var entry = new InventoryEntry(Guid.NewGuid(), item, storageSlotId);
-            state.InventoryEntries.Add(new InventoryEntryState(entry.Id, entry.ItemDefinitionId, entry.StorageSlotId));
-
-            if (state.Rules.All(r => r.ItemDefinitionId != itemDefinitionId))
-            {
-                state.Rules.Add(new ReplenishmentRuleState(Guid.NewGuid(), itemDefinitionId, 2m, "unit", 2, false, false));
-            }
-
+            var entry = new DurableEntry(Guid.NewGuid(), item, storageSlotId);
+            state.DurableEntries.Add(new DurableEntryState(entry.Id, entry.ItemDefinitionId, entry.StorageSlotId));
             SaveState(state);
             return entry;
         }
     }
 
-    public InventoryLot? AddInventoryLot(Guid inventoryEntryId, decimal quantity, string unit, DateOnly? expiresOn, Guid? storageSlotId)
+    public ConsumableEntry? AddConsumableEntry(Guid itemDefinitionId, decimal quantity, string unit, DateOnly? expiresOn, Guid? storageSlotId)
     {
         lock (_sync)
         {
             var state = LoadState();
-            var entryState = state.InventoryEntries.SingleOrDefault(e => e.Id == inventoryEntryId);
-            if (entryState is null)
+            var itemState = state.ItemDefinitions.SingleOrDefault(i => i.Id == itemDefinitionId);
+            if (itemState is null || itemState.Kind != ItemKind.Consumable)
             {
                 return null;
             }
 
-            var lot = new InventoryLot(Guid.NewGuid(), entryState.ItemDefinitionId, Quantity.From(quantity), new Unit(unit), expiresOn, storageSlotId);
-            state.InventoryLots.Add(new InventoryLotState(lot.Id, inventoryEntryId, lot.ItemDefinitionId, lot.Quantity.Value, lot.Unit.Value, lot.ExpiresOn, lot.StorageSlotId));
+            var item = new ItemDefinition(itemState.Id, itemState.Name, itemState.Kind);
+            var entry = new ConsumableEntry(Guid.NewGuid(), item, Quantity.From(quantity), new Unit(unit), expiresOn, storageSlotId);
+            state.ConsumableEntries.Add(new ConsumableEntryState(entry.Id, entry.ItemDefinitionId, entry.Quantity.Value, entry.Unit.Value, entry.ExpiresOn, entry.StorageSlotId));
 
-            var existingRule = state.Rules.SingleOrDefault(r => r.ItemDefinitionId == entryState.ItemDefinitionId);
+            var existingRule = state.Rules.SingleOrDefault(r => r.ItemDefinitionId == itemDefinitionId);
             if (existingRule is not null && string.Equals(existingRule.Unit, "unit", StringComparison.OrdinalIgnoreCase))
             {
                 state.Rules.Remove(existingRule);
@@ -94,7 +96,7 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
             }
 
             SaveState(state);
-            return lot;
+            return entry;
         }
     }
 
@@ -103,36 +105,39 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
         lock (_sync)
         {
             var state = LoadState();
-            return state.InventoryEntries.Select(e =>
+            return state.ConsumableEntries
+                .GroupBy(e => e.ItemDefinitionId)
+                .Select(group =>
             {
-                var item = state.ItemDefinitions.Single(i => i.Id == e.ItemDefinitionId);
-                var lots = state.InventoryLots.Where(l => l.ItemDefinitionId == e.ItemDefinitionId).ToList();
+                var item = state.ItemDefinitions.Single(i => i.Id == group.Key);
+                var entries = group.ToList();
                 return new
                 {
-                    inventoryEntryId = e.Id,
-                    itemDefinitionId = e.ItemDefinitionId,
+                    itemDefinitionId = group.Key,
                     itemName = item.Name,
-                    totalQuantity = lots.Sum(l => l.Quantity),
-                    unit = lots.FirstOrDefault()?.Unit,
-                    lotCount = lots.Count
+                    totalQuantity = entries.Sum(e => e.Quantity),
+                    unit = entries.FirstOrDefault()?.Unit,
+                    entryCount = entries.Count
                 } as object;
             }).ToList();
         }
     }
 
-    public IReadOnlyList<InventoryLotReadModel> GetExpiringLots(DateOnly todayUtc)
+    public IReadOnlyList<ConsumableEntryReadModel> GetExpiringConsumableEntries(DateOnly todayUtc)
     {
         lock (_sync)
         {
             var state = LoadState();
-            return [.. state.InventoryLots
-                .Select(l =>
+            return [.. state.ConsumableEntries
+                .Select(e =>
                 {
-                    var lot = new InventoryLot(l.Id, l.ItemDefinitionId, Quantity.From(l.Quantity), new Unit(l.Unit), l.ExpiresOn, l.StorageSlotId);
-                    var expiryWarningDays = state.Rules.SingleOrDefault(r => r.ItemDefinitionId == l.ItemDefinitionId)?.ExpiryWarningDays ?? 2;
-                    return InventoryLotReadModel.From(lot, todayUtc, expiryWarningDays);
+                    var itemState = state.ItemDefinitions.Single(i => i.Id == e.ItemDefinitionId);
+                    var item = new ItemDefinition(itemState.Id, itemState.Name, itemState.Kind);
+                    var entry = new ConsumableEntry(e.Id, item, Quantity.From(e.Quantity), new Unit(e.Unit), e.ExpiresOn, e.StorageSlotId);
+                    var expiryWarningDays = state.Rules.SingleOrDefault(r => r.ItemDefinitionId == e.ItemDefinitionId)?.ExpiryWarningDays ?? DefaultExpiryWarningDays;
+                    return ConsumableEntryReadModel.From(entry, todayUtc, expiryWarningDays);
                 })
-                .Where(lot => lot.ExpiryStatus is "Expired" or "Urgent" or "Soon")];
+                .Where(entry => entry.ExpiryStatus is "Expired" or "Urgent" or "Soon")];
         }
     }
 
@@ -142,7 +147,7 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
         {
             var state = LoadState();
             return state.Rules
-                .Select(r => new ReplenishmentRule(r.Id, r.ItemDefinitionId, Quantity.From(r.TargetAmount), new Unit(r.Unit), r.ExpiryWarningDays, r.IsHidden, r.IsDisabled))
+                .Select(ToReplenishmentRule)
                 .ToList();
         }
     }
@@ -160,36 +165,29 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
 
             var updated = existing with
             {
-                TargetAmount = desiredAmount ?? existing.TargetAmount,
+                TargetAmount = desiredAmount ?? existing.TargetAmount ?? DefaultDesiredAmount,
                 Unit = string.IsNullOrWhiteSpace(desiredUnit) ? existing.Unit : desiredUnit.Trim(),
-                IsDisabled = isDisabled ?? existing.IsDisabled,
-                ExpiryWarningDays = expiryWarningDays ?? existing.ExpiryWarningDays
+                IsDisabled = isDisabled ?? existing.IsDisabled ?? false,
+                ExpiryWarningDays = expiryWarningDays ?? existing.ExpiryWarningDays ?? DefaultExpiryWarningDays
             };
             state.Rules.Remove(existing);
             state.Rules.Add(updated);
             SaveState(state);
-            return new ReplenishmentRule(updated.Id, updated.ItemDefinitionId, Quantity.From(updated.TargetAmount), new Unit(updated.Unit), updated.ExpiryWarningDays, updated.IsHidden, updated.IsDisabled);
+            return ToReplenishmentRule(updated);
         }
     }
 
-    public IReadOnlyList<InventoryEntry> GetInventoryEntries()
+    public IReadOnlyList<ConsumableEntry> GetConsumableEntries()
     {
         lock (_sync)
         {
             var state = LoadState();
 
-            return state.InventoryEntries.Select(e =>
+            return state.ConsumableEntries.Select(e =>
             {
                 var itemState = state.ItemDefinitions.Single(i => i.Id == e.ItemDefinitionId);
                 var item = new ItemDefinition(itemState.Id, itemState.Name, itemState.Kind);
-                var projected = new InventoryEntry(e.Id, item, e.StorageSlotId);
-
-                foreach (var lot in state.InventoryLots.Where(l => l.ItemDefinitionId == e.ItemDefinitionId))
-                {
-                    projected.AddLot(new InventoryLot(lot.Id, lot.ItemDefinitionId, Quantity.From(lot.Quantity), new Unit(lot.Unit), lot.ExpiresOn, lot.StorageSlotId));
-                }
-
-                return projected;
+                return new ConsumableEntry(e.Id, item, Quantity.From(e.Quantity), new Unit(e.Unit), e.ExpiresOn, e.StorageSlotId);
             }).ToList();
         }
     }
@@ -199,7 +197,7 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
         lock (_sync)
         {
             var state = LoadState();
-            if (state.InventoryEntries.Count > 0)
+            if (state.DurableEntries.Count > 0 || state.ConsumableEntries.Count > 0)
             {
                 return;
             }
@@ -282,7 +280,13 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
         }
 
         var json = File.ReadAllText(_storePath);
-        return JsonSerializer.Deserialize<InventoryMvpState>(json, JsonOptions) ?? new InventoryMvpState();
+        var state = JsonSerializer.Deserialize<InventoryMvpState>(json, JsonOptions) ?? new InventoryMvpState();
+        if (NormalizeState(state))
+        {
+            SaveState(state);
+        }
+
+        return state;
     }
 
     private void SaveState(InventoryMvpState state)
@@ -296,8 +300,8 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
     private sealed class InventoryMvpState
     {
         public List<ItemDefinitionState> ItemDefinitions { get; set; } = [];
-        public List<InventoryEntryState> InventoryEntries { get; set; } = [];
-        public List<InventoryLotState> InventoryLots { get; set; } = [];
+        public List<DurableEntryState> DurableEntries { get; set; } = [];
+        public List<ConsumableEntryState> ConsumableEntries { get; set; } = [];
         public List<ReplenishmentRuleState> Rules { get; set; } = [];
         public List<ShoppingListItemState> ShoppingListItems { get; set; } = [];
     }
@@ -307,11 +311,83 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
         var item = new ItemDefinitionState(Guid.NewGuid(), name, ItemKind.Consumable);
         state.ItemDefinitions.Add(item);
 
-        var entry = new InventoryEntryState(Guid.NewGuid(), item.Id, null);
-        state.InventoryEntries.Add(entry);
+        state.ConsumableEntries.Add(new ConsumableEntryState(Guid.NewGuid(), item.Id, quantity, unit, expiresOn, null));
+        state.Rules.Add(CreateDefaultRule(item.Id, unit: unit));
+    }
 
-        state.InventoryLots.Add(new InventoryLotState(Guid.NewGuid(), entry.Id, item.Id, quantity, unit, expiresOn, null));
-        state.Rules.Add(new ReplenishmentRuleState(Guid.NewGuid(), item.Id, 2m, unit, 2, false, false));
+    private static bool NormalizeState(InventoryMvpState state)
+    {
+        var changed = false;
+        var consumableItemIds = state.ItemDefinitions
+            .Where(item => item.Kind == ItemKind.Consumable)
+            .Select(item => item.Id)
+            .ToHashSet();
+
+        var nonConsumableRules = state.Rules
+            .Where(rule => !consumableItemIds.Contains(rule.ItemDefinitionId))
+            .ToList();
+        foreach (var rule in nonConsumableRules)
+        {
+            state.Rules.Remove(rule);
+            changed = true;
+        }
+
+        foreach (var itemId in consumableItemIds)
+        {
+            if (state.Rules.All(rule => rule.ItemDefinitionId != itemId))
+            {
+                state.Rules.Add(CreateDefaultRule(itemId));
+                changed = true;
+            }
+        }
+
+        for (var i = 0; i < state.Rules.Count; i++)
+        {
+            var normalized = NormalizeRule(state.Rules[i]);
+            if (normalized != state.Rules[i])
+            {
+                state.Rules[i] = normalized;
+                changed = true;
+            }
+        }
+
+        return changed;
+    }
+
+    private static ReplenishmentRuleState NormalizeRule(ReplenishmentRuleState rule)
+    {
+        return rule with
+        {
+            TargetAmount = rule.TargetAmount ?? DefaultDesiredAmount,
+            Unit = string.IsNullOrWhiteSpace(rule.Unit) ? DefaultDesiredUnit : rule.Unit.Trim(),
+            ExpiryWarningDays = rule.ExpiryWarningDays ?? DefaultExpiryWarningDays,
+            IsDisabled = rule.IsDisabled ?? false
+        };
+    }
+
+    private static ReplenishmentRuleState CreateDefaultRule(Guid itemDefinitionId, decimal? amount = null, string? unit = null)
+    {
+        return new ReplenishmentRuleState(
+            Guid.NewGuid(),
+            itemDefinitionId,
+            amount ?? DefaultDesiredAmount,
+            string.IsNullOrWhiteSpace(unit) ? DefaultDesiredUnit : unit.Trim(),
+            DefaultExpiryWarningDays,
+            false,
+            false);
+    }
+
+    private static ReplenishmentRule ToReplenishmentRule(ReplenishmentRuleState rule)
+    {
+        var normalized = NormalizeRule(rule);
+        return new ReplenishmentRule(
+            normalized.Id,
+            normalized.ItemDefinitionId,
+            Quantity.From(normalized.TargetAmount ?? DefaultDesiredAmount),
+            new Unit(normalized.Unit ?? DefaultDesiredUnit),
+            normalized.ExpiryWarningDays ?? DefaultExpiryWarningDays,
+            normalized.IsHidden,
+            normalized.IsDisabled ?? false);
     }
 
     private static object ToShoppingListReadModel(ShoppingListItemState state, string itemName) => new
@@ -326,8 +402,8 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
     };
 
     private sealed record ItemDefinitionState(Guid Id, string Name, ItemKind Kind);
-    private sealed record InventoryEntryState(Guid Id, Guid ItemDefinitionId, Guid? StorageSlotId);
-    private sealed record InventoryLotState(Guid Id, Guid InventoryEntryId, Guid ItemDefinitionId, decimal Quantity, string Unit, DateOnly? ExpiresOn, Guid? StorageSlotId);
-    private sealed record ReplenishmentRuleState(Guid Id, Guid ItemDefinitionId, decimal TargetAmount, string Unit, int ExpiryWarningDays, bool IsHidden, bool IsDisabled);
+    private sealed record DurableEntryState(Guid Id, Guid ItemDefinitionId, Guid? StorageSlotId);
+    private sealed record ConsumableEntryState(Guid Id, Guid ItemDefinitionId, decimal Quantity, string Unit, DateOnly? ExpiresOn, Guid? StorageSlotId);
+    private sealed record ReplenishmentRuleState(Guid Id, Guid ItemDefinitionId, decimal? TargetAmount, string? Unit, int? ExpiryWarningDays, bool IsHidden, bool? IsDisabled);
     private sealed record ShoppingListItemState(Guid Id, Guid ItemDefinitionId, string ItemName, decimal Quantity, string Unit, bool IsResolved, bool IsPurchased);
 }

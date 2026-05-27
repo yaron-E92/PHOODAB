@@ -1,6 +1,6 @@
 namespace Phoodab.Application;
 
-public static class InventoryLotExpiryCalculator
+public static class ConsumableEntryExpiryCalculator
 {
     private const int SoonWindowDays = 5;
 

@@ -57,26 +57,26 @@ app.MapPost("/api/item-definitions", (CreateItemDefinitionRequest request, IInve
     return Results.Ok(item);
 }).WithOpenApi();
 
-app.MapPost("/api/inventory-entries", (CreateInventoryEntryRequest request, IInventoryMvpStore store) =>
+app.MapPost("/api/durable-entries", (CreateDurableEntryRequest request, IInventoryMvpStore store) =>
 {
-    var entry = store.CreateInventoryEntry(request.ItemDefinitionId, request.StorageSlotId);
+    var entry = store.CreateDurableEntry(request.ItemDefinitionId, request.StorageSlotId);
     return entry is null ? Results.NotFound() : Results.Ok(entry);
 }).WithOpenApi();
 
-app.MapPost("/api/inventory-lots", (CreateInventoryLotRequest request, IInventoryMvpStore store) =>
+app.MapPost("/api/consumable-entries", (CreateConsumableEntryRequest request, IInventoryMvpStore store) =>
 {
-    var lot = store.AddInventoryLot(request.InventoryEntryId, request.Quantity, request.Unit, request.ExpiresOn, request.StorageSlotId);
-    return lot is null ? Results.NotFound() : Results.Ok(lot);
+    var entry = store.AddConsumableEntry(request.ItemDefinitionId, request.Quantity, request.Unit, request.ExpiresOn, request.StorageSlotId);
+    return entry is null ? Results.NotFound() : Results.Ok(entry);
 }).WithOpenApi();
 
 app.MapGet("/api/inventory/summary", (IInventoryMvpStore store) => Results.Ok(store.GetSummary())).WithOpenApi();
 
-app.MapGet("/api/inventory/expiring", (IInventoryMvpStore store, IUtcDateProvider utcDateProvider) =>
-    Results.Ok(store.GetExpiringLots(utcDateProvider.TodayUtc))).WithOpenApi();
+app.MapGet("/api/consumable-entries/expiring", (IInventoryMvpStore store, IUtcDateProvider utcDateProvider) =>
+    Results.Ok(store.GetExpiringConsumableEntries(utcDateProvider.TodayUtc))).WithOpenApi();
 
 app.MapGet("/api/replenishment/suggestions", (ReplenishmentSuggestionService suggestionService, IInventoryMvpStore store) =>
 {
-    var suggestions = suggestionService.GetSuggestions(store.GetRules(), store.GetInventoryEntries());
+    var suggestions = suggestionService.GetSuggestions(store.GetRules(), store.GetConsumableEntries());
     return Results.Ok(suggestions);
 })
 .WithName("GetReplenishmentSuggestions")
@@ -116,7 +116,7 @@ app.MapGet("/api/shopping-list-items", (IInventoryMvpStore store) => Results.Ok(
 
 app.MapGet("/replenishment/suggestions", (ReplenishmentSuggestionService suggestionService, IInventoryMvpStore store) =>
 {
-    var suggestions = suggestionService.GetSuggestions(store.GetRules(), store.GetInventoryEntries());
+    var suggestions = suggestionService.GetSuggestions(store.GetRules(), store.GetConsumableEntries());
     return Results.Ok(suggestions);
 })
 .WithName("GetReplenishmentSuggestionsLegacy")
@@ -138,8 +138,8 @@ app.Run();
 public sealed record HealthResponse([property: Required] string Status);
 public sealed record VersionResponse([property: Required] string Version);
 public sealed record CreateItemDefinitionRequest(string Name, ItemKind Kind, decimal? DesiredAmount, string? DesiredUnit);
-public sealed record CreateInventoryEntryRequest(Guid ItemDefinitionId, Guid? StorageSlotId);
-public sealed record CreateInventoryLotRequest(Guid InventoryEntryId, decimal Quantity, string Unit, DateOnly? ExpiresOn, Guid? StorageSlotId);
+public sealed record CreateDurableEntryRequest(Guid ItemDefinitionId, Guid? StorageSlotId);
+public sealed record CreateConsumableEntryRequest(Guid ItemDefinitionId, decimal Quantity, string Unit, DateOnly? ExpiresOn, Guid? StorageSlotId);
 public sealed record CreateShoppingListItemFromSuggestionRequest(Guid ItemDefinitionId, decimal Quantity, string Unit);
 public sealed record UpdateShoppingListItemStatusRequest(bool? IsResolved, bool? IsPurchased);
 public sealed record UpdateReplenishmentRuleRequest(decimal? DesiredAmount, string? DesiredUnit, bool? IsDisabled, int? ExpiryWarningDays);

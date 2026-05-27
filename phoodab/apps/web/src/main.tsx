@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import {
-  addInventoryLot,
+  addConsumableEntry,
   createConsumableItem,
-  getExpiringLots,
+  getExpiringConsumableEntries,
   getHealth,
   getInventorySummary,
   getReplenishmentSuggestions,
@@ -13,7 +13,7 @@ import {
   createShoppingListItemFromSuggestion,
   updateShoppingListItemStatus,
   updateReplenishmentRule,
-  type ExpiringLot,
+  type ExpiringConsumableEntry,
   type InventorySummaryItem,
   type ReplenishmentSuggestion,
   type ReplenishmentRule,
@@ -30,14 +30,14 @@ export function App() {
   const [itemName, setItemName] = useState('');
   const [desiredAmount, setDesiredAmount] = useState('');
   const [desiredUnit, setDesiredUnit] = useState('');
-  const [lotItemDefinitionId, setLotItemDefinitionId] = useState('');
+  const [entryItemDefinitionId, setEntryItemDefinitionId] = useState('');
   const [quantity, setQuantity] = useState('');
   const [unit, setUnit] = useState('');
   const [expiryDate, setExpiryDate] = useState('');
   const [storageSlotId, setStorageSlotId] = useState('');
 
   const [summary, setSummary] = useState<InventorySummaryItem[]>([]);
-  const [expiringLots, setExpiringLots] = useState<ExpiringLot[]>([]);
+  const [expiringEntries, setExpiringEntries] = useState<ExpiringConsumableEntry[]>([]);
   const [suggestions, setSuggestions] = useState<ReplenishmentSuggestion[]>([]);
   const [createdItems, setCreatedItems] = useState<ItemDefinition[]>([]);
   const [shoppingListItems, setShoppingListItems] = useState<ShoppingListItem[]>([]);
@@ -53,13 +53,13 @@ export function App() {
     try {
       const [summaryData, expiringData, suggestionData, shoppingData, rulesData] = await Promise.all([
         getInventorySummary(baseUrl),
-        getExpiringLots(baseUrl),
+        getExpiringConsumableEntries(baseUrl),
         getReplenishmentSuggestions(baseUrl),
         getShoppingListItems(baseUrl),
         getReplenishmentRules(baseUrl)
       ]);
       setSummary(summaryData);
-      setExpiringLots(expiringData);
+      setExpiringEntries(expiringData);
       setSuggestions(suggestionData);
       setShoppingListItems(shoppingData);
       setRules(rulesData);
@@ -104,20 +104,20 @@ export function App() {
       setItemName('');
       setDesiredAmount('');
       setDesiredUnit('');
-      setLotItemDefinitionId(created.id);
+      setEntryItemDefinitionId(created.id);
       await loadData();
     } catch (e) {
       setError(String(e));
     }
   };
 
-  const onAddLot = async (event: React.FormEvent) => {
+  const onAddConsumableEntry = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!lotItemDefinitionId || !quantity || !unit.trim()) return;
+    if (!entryItemDefinitionId || !quantity || !unit.trim()) return;
 
     try {
-      await addInventoryLot(baseUrl, {
-        itemDefinitionId: lotItemDefinitionId,
+      await addConsumableEntry(baseUrl, {
+        itemDefinitionId: entryItemDefinitionId,
         quantity: Number(quantity),
         unit: unit.trim(),
         expiresOn: expiryDate || null,
@@ -163,9 +163,9 @@ export function App() {
         <button type="submit">Create Item</button>
       </form>
 
-      <h2>Add Lot</h2>
-      <form onSubmit={onAddLot}>
-        <select value={lotItemDefinitionId} onChange={(e) => setLotItemDefinitionId(e.target.value)}>
+      <h2>Add Consumable Entry</h2>
+      <form onSubmit={onAddConsumableEntry}>
+        <select value={entryItemDefinitionId} onChange={(e) => setEntryItemDefinitionId(e.target.value)}>
           <option value="">Select item</option>
           {createdItems.map((item) => (
             <option key={item.id} value={item.id}>
@@ -184,7 +184,7 @@ export function App() {
         <input placeholder="Unit" value={unit} onChange={(e) => setUnit(e.target.value)} />
         <input type="date" value={expiryDate} onChange={(e) => setExpiryDate(e.target.value)} />
         <input placeholder="Storage slot ID (optional)" value={storageSlotId} onChange={(e) => setStorageSlotId(e.target.value)} />
-        <button type="submit">Add Lot</button>
+        <button type="submit">Add Entry</button>
       </form>
 
       <h2>Inventory Summary</h2>
@@ -194,20 +194,20 @@ export function App() {
       {!isLoading && !error && summary.length > 0 && (
         <ul>
           {summary.map((item) => (
-            <li key={item.inventoryEntryId}>
-              {item.itemName}: {item.totalQuantity} {item.unit ?? ''} ({item.lotCount} lots)
+            <li key={item.itemDefinitionId}>
+              {item.itemName}: {item.totalQuantity} {item.unit ?? ''} ({item.entryCount} entries)
             </li>
           ))}
         </ul>
       )}
 
-      <h2>Expiring / Expired Lots</h2>
-      {!isLoading && !error && expiringLots.length === 0 && <p>No expiring lots.</p>}
-      {!isLoading && !error && expiringLots.length > 0 && (
+      <h2>Expiring / Expired Entries</h2>
+      {!isLoading && !error && expiringEntries.length === 0 && <p>No expiring entries.</p>}
+      {!isLoading && !error && expiringEntries.length > 0 && (
         <ul>
-          {expiringLots.map((lot) => (
-            <li key={lot.lotId}>
-              {lot.quantity} {lot.unit} - {lot.expiryStatus}
+          {expiringEntries.map((entry) => (
+            <li key={entry.entryId}>
+              {entry.quantity} {entry.unit} - {entry.expiryStatus}
             </li>
           ))}
         </ul>
