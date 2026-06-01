@@ -9,6 +9,8 @@ public interface IInventoryMvpStore
     DurableEntry? CreateDurableEntry(Guid itemDefinitionId, Guid? storageSlotId);
     ConsumableEntry? AddConsumableEntry(Guid itemDefinitionId, decimal quantity, string unit, DateOnly? expiresOn, Guid? storageSlotId);
     IReadOnlyList<object> GetSummary();
+    IReadOnlyList<ConsumableEntryReadModel> GetConsumableEntryReadModels(DateOnly todayUtc);
+    ConsumableEntryReadModel? UpdateConsumableEntry(Guid entryId, decimal quantity, string unit, DateOnly? expiresOn, Guid? storageSlotId, DateOnly todayUtc);
     IReadOnlyList<ConsumableEntryReadModel> GetExpiringConsumableEntries(DateOnly todayUtc);
     IReadOnlyList<ReplenishmentRule> GetRules();
     ReplenishmentRule? UpdateRule(Guid ruleId, decimal? desiredAmount, string? desiredUnit, bool? isDisabled, int? expiryWarningDays);
@@ -111,15 +113,53 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
             {
                 var item = state.ItemDefinitions.Single(i => i.Id == group.Key);
                 var entries = group.ToList();
+                var units = entries.Select(e => e.Unit).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                var hasMixedUnits = units.Count > 1;
                 return new
                 {
                     itemDefinitionId = group.Key,
                     itemName = item.Name,
-                    totalQuantity = entries.Sum(e => e.Quantity),
-                    unit = entries.FirstOrDefault()?.Unit,
-                    entryCount = entries.Count
+                    totalQuantity = hasMixedUnits ? (decimal?)null : entries.Sum(e => e.Quantity),
+                    unit = hasMixedUnits ? null : entries.FirstOrDefault()?.Unit,
+                    entryCount = entries.Count,
+                    hasMixedUnits,
+                    mixedUnitWarning = hasMixedUnits ? "Mixed units cannot be totaled safely." : null
                 } as object;
             }).ToList();
+        }
+    }
+
+    public IReadOnlyList<ConsumableEntryReadModel> GetConsumableEntryReadModels(DateOnly todayUtc)
+    {
+        lock (_sync)
+        {
+            var state = LoadState();
+            return [.. state.ConsumableEntries.Select(e => ToConsumableEntryReadModel(state, e, todayUtc))];
+        }
+    }
+
+    public ConsumableEntryReadModel? UpdateConsumableEntry(Guid entryId, decimal quantity, string unit, DateOnly? expiresOn, Guid? storageSlotId, DateOnly todayUtc)
+    {
+        lock (_sync)
+        {
+            var state = LoadState();
+            var existing = state.ConsumableEntries.SingleOrDefault(e => e.Id == entryId);
+            if (existing is null)
+            {
+                return null;
+            }
+
+            var itemState = state.ItemDefinitions.Single(i => i.Id == existing.ItemDefinitionId);
+            var item = new ItemDefinition(itemState.Id, itemState.Name, itemState.Kind);
+            var entry = new ConsumableEntry(entryId, item, Quantity.From(quantity), new Unit(unit), expiresOn, storageSlotId);
+            var updated = new ConsumableEntryState(entry.Id, entry.ItemDefinitionId, entry.Quantity.Value, entry.Unit.Value, entry.ExpiresOn, entry.StorageSlotId);
+
+            state.ConsumableEntries.Remove(existing);
+            state.ConsumableEntries.Add(updated);
+            SaveState(state);
+
+            var expiryWarningDays = state.Rules.SingleOrDefault(r => r.ItemDefinitionId == updated.ItemDefinitionId)?.ExpiryWarningDays ?? DefaultExpiryWarningDays;
+            return ConsumableEntryReadModel.From(entry, todayUtc, expiryWarningDays);
         }
     }
 
@@ -129,14 +169,7 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
         {
             var state = LoadState();
             return [.. state.ConsumableEntries
-                .Select(e =>
-                {
-                    var itemState = state.ItemDefinitions.Single(i => i.Id == e.ItemDefinitionId);
-                    var item = new ItemDefinition(itemState.Id, itemState.Name, itemState.Kind);
-                    var entry = new ConsumableEntry(e.Id, item, Quantity.From(e.Quantity), new Unit(e.Unit), e.ExpiresOn, e.StorageSlotId);
-                    var expiryWarningDays = state.Rules.SingleOrDefault(r => r.ItemDefinitionId == e.ItemDefinitionId)?.ExpiryWarningDays ?? DefaultExpiryWarningDays;
-                    return ConsumableEntryReadModel.From(entry, todayUtc, expiryWarningDays);
-                })
+                .Select(e => ToConsumableEntryReadModel(state, e, todayUtc))
                 .Where(entry => entry.ExpiryStatus is "Expired" or "Urgent" or "Soon")];
         }
     }
@@ -400,6 +433,15 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
         isResolved = state.IsResolved,
         isPurchased = state.IsPurchased
     };
+
+    private static ConsumableEntryReadModel ToConsumableEntryReadModel(InventoryMvpState state, ConsumableEntryState entryState, DateOnly todayUtc)
+    {
+        var itemState = state.ItemDefinitions.Single(i => i.Id == entryState.ItemDefinitionId);
+        var item = new ItemDefinition(itemState.Id, itemState.Name, itemState.Kind);
+        var entry = new ConsumableEntry(entryState.Id, item, Quantity.From(entryState.Quantity), new Unit(entryState.Unit), entryState.ExpiresOn, entryState.StorageSlotId);
+        var expiryWarningDays = state.Rules.SingleOrDefault(r => r.ItemDefinitionId == entryState.ItemDefinitionId)?.ExpiryWarningDays ?? DefaultExpiryWarningDays;
+        return ConsumableEntryReadModel.From(entry, todayUtc, expiryWarningDays);
+    }
 
     private sealed record ItemDefinitionState(Guid Id, string Name, ItemKind Kind);
     private sealed record DurableEntryState(Guid Id, Guid ItemDefinitionId, Guid? StorageSlotId);

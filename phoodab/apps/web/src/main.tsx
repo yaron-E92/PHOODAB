@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import {
   addConsumableEntry,
   createConsumableItem,
+  getConsumableEntries,
   getExpiringConsumableEntries,
   getHealth,
   getInventorySummary,
@@ -12,6 +13,8 @@ import {
   getVersion,
   createShoppingListItemFromSuggestion,
   updateShoppingListItemStatus,
+  updateConsumableEntry,
+  type ConsumableEntry,
   updateReplenishmentRule,
   type ExpiringConsumableEntry,
   type InventorySummaryItem,
@@ -37,6 +40,8 @@ export function App() {
   const [storageSlotId, setStorageSlotId] = useState('');
 
   const [summary, setSummary] = useState<InventorySummaryItem[]>([]);
+  const [consumableEntries, setConsumableEntries] = useState<ConsumableEntry[]>([]);
+  const [entryEdits, setEntryEdits] = useState<Record<string, { quantity: string; unit: string; expiresOn: string; storageSlotId: string }>>({});
   const [expiringEntries, setExpiringEntries] = useState<ExpiringConsumableEntry[]>([]);
   const [suggestions, setSuggestions] = useState<ReplenishmentSuggestion[]>([]);
   const [createdItems, setCreatedItems] = useState<ItemDefinition[]>([]);
@@ -51,14 +56,25 @@ export function App() {
     setError(null);
 
     try {
-      const [summaryData, expiringData, suggestionData, shoppingData, rulesData] = await Promise.all([
+      const [summaryData, entriesData, expiringData, suggestionData, shoppingData, rulesData] = await Promise.all([
         getInventorySummary(baseUrl),
+        getConsumableEntries(baseUrl),
         getExpiringConsumableEntries(baseUrl),
         getReplenishmentSuggestions(baseUrl),
         getShoppingListItems(baseUrl),
         getReplenishmentRules(baseUrl)
       ]);
       setSummary(summaryData);
+      setConsumableEntries(entriesData);
+      setEntryEdits(Object.fromEntries(entriesData.map((entry) => [
+        entry.entryId,
+        {
+          quantity: String(entry.quantity),
+          unit: entry.unit,
+          expiresOn: entry.expiresOn ?? '',
+          storageSlotId: entry.storageSlotId ?? ''
+        }
+      ])));
       setExpiringEntries(expiringData);
       setSuggestions(suggestionData);
       setShoppingListItems(shoppingData);
@@ -143,6 +159,29 @@ export function App() {
     await loadData();
   };
 
+  const setEntryEdit = (entryId: string, patch: Partial<{ quantity: string; unit: string; expiresOn: string; storageSlotId: string }>) => {
+    setEntryEdits((current) => ({
+      ...current,
+      [entryId]: {
+        ...current[entryId],
+        ...patch
+      }
+    }));
+  };
+
+  const onSaveConsumableEntry = async (entry: ConsumableEntry) => {
+    const edit = entryEdits[entry.entryId];
+    if (!edit || !edit.quantity || !edit.unit.trim()) return;
+
+    await updateConsumableEntry(baseUrl, entry.entryId, {
+      quantity: Number(edit.quantity),
+      unit: edit.unit.trim(),
+      expiresOn: edit.expiresOn || null,
+      storageSlotId: edit.storageSlotId || null
+    });
+    await loadData();
+  };
+
   return (
     <main style={{ fontFamily: 'system-ui', padding: 16 }}>
       <h1>PHOODAB Pantry MVP</h1>
@@ -195,9 +234,69 @@ export function App() {
         <ul>
           {summary.map((item) => (
             <li key={item.itemDefinitionId}>
-              {item.itemName}: {item.totalQuantity} {item.unit ?? ''} ({item.entryCount} entries)
+              {item.hasMixedUnits
+                ? `${item.itemName}: mixed units (${item.entryCount} entries)`
+                : `${item.itemName}: ${item.totalQuantity} ${item.unit ?? ''} (${item.entryCount} entries)`}
+              {item.mixedUnitWarning && <strong style={{ color: '#9a3412', marginLeft: 8 }}>{item.mixedUnitWarning}</strong>}
             </li>
           ))}
+        </ul>
+      )}
+
+      <h2>Consumable Entry Audit</h2>
+      {!isLoading && !error && consumableEntries.length === 0 && <p>No consumable entries.</p>}
+      {!isLoading && !error && consumableEntries.length > 0 && (
+        <ul>
+          {consumableEntries.map((entry) => {
+            const edit = entryEdits[entry.entryId] ?? {
+              quantity: String(entry.quantity),
+              unit: entry.unit,
+              expiresOn: entry.expiresOn ?? '',
+              storageSlotId: entry.storageSlotId ?? ''
+            };
+            const isExpired = entry.expiryStatus === 'Expired';
+            return (
+              <li
+                key={entry.entryId}
+                style={{
+                  background: isExpired ? '#fee2e2' : undefined,
+                  borderLeft: isExpired ? '4px solid #dc2626' : undefined,
+                  marginBottom: 8,
+                  padding: 8
+                }}
+              >
+                <strong>{entry.itemName}</strong> - {entry.quantity} {entry.unit} - {entry.expiresOn ?? 'No expiry'} - {entry.expiryStatus}
+                {entry.storageSlotId && <> - {entry.storageSlotId}</>}
+                <div>
+                  <input
+                    aria-label={`Entry quantity for ${entry.itemName}`}
+                    type="number"
+                    step="any"
+                    value={edit.quantity}
+                    onChange={(e) => setEntryEdit(entry.entryId, { quantity: e.target.value })}
+                  />
+                  <input
+                    aria-label={`Entry unit for ${entry.itemName}`}
+                    value={edit.unit}
+                    onChange={(e) => setEntryEdit(entry.entryId, { unit: e.target.value })}
+                  />
+                  <input
+                    aria-label={`Entry expiry for ${entry.itemName}`}
+                    type="date"
+                    value={edit.expiresOn}
+                    onChange={(e) => setEntryEdit(entry.entryId, { expiresOn: e.target.value })}
+                  />
+                  <input
+                    aria-label={`Entry storage slot for ${entry.itemName}`}
+                    placeholder="Storage slot ID (optional)"
+                    value={edit.storageSlotId}
+                    onChange={(e) => setEntryEdit(entry.entryId, { storageSlotId: e.target.value })}
+                  />
+                  <button style={{ marginLeft: 8 }} onClick={() => onSaveConsumableEntry(entry)}>Save Entry</button>
+                </div>
+              </li>
+            );
+          })}
         </ul>
       )}
 

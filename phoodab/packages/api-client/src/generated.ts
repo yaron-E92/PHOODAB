@@ -117,7 +117,26 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ConsumableEntryReadModel"][];
+                    };
+                };
+            };
+        };
         put?: never;
         post: {
             parameters: {
@@ -145,6 +164,55 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/consumable-entries/{entryId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** Format: uuid */
+                    entryId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["UpdateConsumableEntryRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ConsumableEntryReadModel"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
         trace?: never;
     };
     "/api/inventory/summary": {
@@ -458,6 +526,23 @@ export interface components {
             /** Format: uuid */
             storageSlotId?: string | null;
         };
+        ConsumableEntryReadModel: {
+            /** Format: uuid */
+            entryId: string;
+            /** Format: uuid */
+            itemDefinitionId: string;
+            itemName: string;
+            /** Format: double */
+            quantity: number;
+            unit: string;
+            /** Format: date */
+            expiresOn?: string | null;
+            /** Format: int32 */
+            expiresInDays?: number | null;
+            expiryStatus: string;
+            /** Format: uuid */
+            storageSlotId?: string | null;
+        };
         CreateItemDefinitionRequest: {
             name?: string | null;
             kind?: components["schemas"]["ItemKind"];
@@ -499,6 +584,15 @@ export interface components {
             isDisabled?: boolean | null;
             /** Format: int32 */
             expiryWarningDays?: number | null;
+        };
+        UpdateConsumableEntryRequest: {
+            /** Format: double */
+            quantity?: number;
+            unit?: string | null;
+            /** Format: date */
+            expiresOn?: string | null;
+            /** Format: uuid */
+            storageSlotId?: string | null;
         };
         UpdateShoppingListItemStatusRequest: {
             isResolved?: boolean | null;
