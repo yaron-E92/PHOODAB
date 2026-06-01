@@ -69,6 +69,20 @@ app.MapPost("/api/consumable-entries", (CreateConsumableEntryRequest request, II
     return entry is null ? Results.NotFound() : Results.Ok(entry);
 }).WithOpenApi();
 
+app.MapGet("/api/consumable-entries", (IInventoryMvpStore store, IUtcDateProvider utcDateProvider) =>
+    Results.Ok(store.GetConsumableEntryReadModels(utcDateProvider.TodayUtc)))
+.Produces<IEnumerable<ConsumableEntryReadModel>>(StatusCodes.Status200OK)
+.WithOpenApi();
+
+app.MapPatch("/api/consumable-entries/{entryId:guid}", (Guid entryId, UpdateConsumableEntryRequest request, IInventoryMvpStore store, IUtcDateProvider utcDateProvider) =>
+{
+    var updated = store.UpdateConsumableEntry(entryId, request.Quantity, request.Unit, request.ExpiresOn, request.StorageSlotId, utcDateProvider.TodayUtc);
+    return updated is null ? Results.NotFound() : Results.Ok(updated);
+})
+.Produces<ConsumableEntryReadModel>(StatusCodes.Status200OK)
+.Produces(StatusCodes.Status404NotFound)
+.WithOpenApi();
+
 app.MapGet("/api/inventory/summary", (IInventoryMvpStore store) => Results.Ok(store.GetSummary())).WithOpenApi();
 
 app.MapGet("/api/consumable-entries/expiring", (IInventoryMvpStore store, IUtcDateProvider utcDateProvider) =>
@@ -140,6 +154,7 @@ public sealed record VersionResponse([property: Required] string Version);
 public sealed record CreateItemDefinitionRequest(string Name, ItemKind Kind, decimal? DesiredAmount, string? DesiredUnit);
 public sealed record CreateDurableEntryRequest(Guid ItemDefinitionId, Guid? StorageSlotId);
 public sealed record CreateConsumableEntryRequest(Guid ItemDefinitionId, decimal Quantity, string Unit, DateOnly? ExpiresOn, Guid? StorageSlotId);
+public sealed record UpdateConsumableEntryRequest(decimal Quantity, string Unit, DateOnly? ExpiresOn, Guid? StorageSlotId);
 public sealed record CreateShoppingListItemFromSuggestionRequest(Guid ItemDefinitionId, decimal Quantity, string Unit);
 public sealed record UpdateShoppingListItemStatusRequest(bool? IsResolved, bool? IsPurchased);
 public sealed record UpdateReplenishmentRuleRequest(decimal? DesiredAmount, string? DesiredUnit, bool? IsDisabled, int? ExpiryWarningDays);

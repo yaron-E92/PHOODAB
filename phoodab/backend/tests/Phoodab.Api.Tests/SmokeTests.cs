@@ -77,6 +77,7 @@ public class SmokeTests
         Assert.That(paths.TryGetProperty("/api/item-definitions", out _), Is.True);
         Assert.That(paths.TryGetProperty("/api/durable-entries", out _), Is.True);
         Assert.That(paths.TryGetProperty("/api/consumable-entries", out _), Is.True);
+        Assert.That(paths.TryGetProperty("/api/consumable-entries/{entryId}", out _), Is.True);
         Assert.That(paths.TryGetProperty("/api/inventory/summary", out _), Is.True);
         Assert.That(paths.TryGetProperty("/api/consumable-entries/expiring", out _), Is.True);
         Assert.That(paths.TryGetProperty("/api/replenishment/suggestions", out _), Is.True);
@@ -224,6 +225,83 @@ public class SmokeTests
             .EnumerateArray().ToList();
         suggestion = suggestions.Single(x => x.GetProperty("itemDefinitionId").GetGuid() == itemId);
         Assert.That(suggestion.GetProperty("requiredAmount").GetDecimal(), Is.EqualTo(0m));
+    }
+
+    [Test]
+    public async Task Consumable_entries_can_be_listed_and_updated_recalculating_summary()
+    {
+        var itemId = await CreateConsumableItem("Coffee");
+        var storageSlotId = Guid.NewGuid();
+        var updatedStorageSlotId = Guid.NewGuid();
+        var entryResponse = await _client.PostAsJsonAsync("/api/consumable-entries", new
+        {
+            itemDefinitionId = itemId,
+            quantity = 1m,
+            unit = "bag",
+            expiresOn = (DateOnly?)null,
+            storageSlotId
+        });
+        Assert.That(entryResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        var entryId = JsonSerializer.Deserialize<JsonElement>(await entryResponse.Content.ReadAsStringAsync()).GetProperty("id").GetGuid();
+
+        var entries = JsonSerializer.Deserialize<JsonElement>(await (await _client.GetAsync("/api/consumable-entries")).Content.ReadAsStringAsync())
+            .EnumerateArray().ToList();
+        var entry = entries.Single(x => x.GetProperty("entryId").GetGuid() == entryId);
+        Assert.Multiple(() =>
+        {
+            Assert.That(entry.GetProperty("itemDefinitionId").GetGuid(), Is.EqualTo(itemId));
+            Assert.That(entry.GetProperty("itemName").GetString(), Is.EqualTo("Coffee"));
+            Assert.That(entry.GetProperty("quantity").GetDecimal(), Is.EqualTo(1m));
+            Assert.That(entry.GetProperty("unit").GetString(), Is.EqualTo("bag"));
+            Assert.That(entry.GetProperty("expiryStatus").GetString(), Is.EqualTo("Unknown"));
+            Assert.That(entry.GetProperty("storageSlotId").GetGuid(), Is.EqualTo(storageSlotId));
+        });
+
+        var safeDate = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(14));
+        var patchResponse = await _client.PatchAsJsonAsync($"/api/consumable-entries/{entryId}", new
+        {
+            quantity = 3m,
+            unit = "tin",
+            expiresOn = safeDate,
+            storageSlotId = updatedStorageSlotId
+        });
+        Assert.That(patchResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        var updated = JsonSerializer.Deserialize<JsonElement>(await patchResponse.Content.ReadAsStringAsync());
+        Assert.Multiple(() =>
+        {
+            Assert.That(updated.GetProperty("quantity").GetDecimal(), Is.EqualTo(3m));
+            Assert.That(updated.GetProperty("unit").GetString(), Is.EqualTo("tin"));
+            Assert.That(updated.GetProperty("expiryStatus").GetString(), Is.EqualTo("Safe"));
+            Assert.That(updated.GetProperty("storageSlotId").GetGuid(), Is.EqualTo(updatedStorageSlotId));
+        });
+
+        var summary = JsonSerializer.Deserialize<JsonElement>(await (await _client.GetAsync("/api/inventory/summary")).Content.ReadAsStringAsync())
+            .EnumerateArray().Single(x => x.GetProperty("itemDefinitionId").GetGuid() == itemId);
+        Assert.Multiple(() =>
+        {
+            Assert.That(summary.GetProperty("totalQuantity").GetDecimal(), Is.EqualTo(3m));
+            Assert.That(summary.GetProperty("unit").GetString(), Is.EqualTo("tin"));
+            Assert.That(summary.GetProperty("hasMixedUnits").GetBoolean(), Is.False);
+        });
+    }
+
+    [Test]
+    public async Task Inventory_summary_flags_mixed_units_without_misleading_total()
+    {
+        var itemId = await CreateConsumableItem("Rice");
+
+        await _client.PostAsJsonAsync("/api/consumable-entries", new { itemDefinitionId = itemId, quantity = 1m, unit = "kg", expiresOn = (DateOnly?)null, storageSlotId = (Guid?)null });
+        await _client.PostAsJsonAsync("/api/consumable-entries", new { itemDefinitionId = itemId, quantity = 2m, unit = "bag", expiresOn = (DateOnly?)null, storageSlotId = (Guid?)null });
+
+        var summary = JsonSerializer.Deserialize<JsonElement>(await (await _client.GetAsync("/api/inventory/summary")).Content.ReadAsStringAsync())
+            .EnumerateArray().Single(x => x.GetProperty("itemDefinitionId").GetGuid() == itemId);
+        Assert.Multiple(() =>
+        {
+            Assert.That(summary.GetProperty("totalQuantity").ValueKind, Is.EqualTo(JsonValueKind.Null));
+            Assert.That(summary.GetProperty("unit").ValueKind, Is.EqualTo(JsonValueKind.Null));
+            Assert.That(summary.GetProperty("hasMixedUnits").GetBoolean(), Is.True);
+            Assert.That(summary.GetProperty("mixedUnitWarning").GetString(), Is.EqualTo("Mixed units cannot be totaled safely."));
+        });
     }
 
     [Test]
