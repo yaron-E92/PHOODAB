@@ -89,8 +89,11 @@ export function App() {
   const onCreateFromSuggestion = async (suggestion: ReplenishmentSuggestion) => {
     await createShoppingListItemFromSuggestion(baseUrl, {
       itemDefinitionId: suggestion.itemDefinitionId,
-      quantity: suggestion.requiredAmount,
-      unit: suggestion.unit
+      quantity: suggestion.suggestedPurchaseAmount,
+      unit: suggestion.unit,
+      deficitAmount: suggestion.deficitAmount,
+      expiringSoonAmount: suggestion.expiringSoonAmount,
+      suggestedPurchaseAmount: suggestion.suggestedPurchaseAmount
     });
     await loadData();
   };
@@ -318,7 +321,8 @@ export function App() {
         <ul>
           {suggestions.map((suggestion) => (
             <li key={suggestion.itemDefinitionId}>
-              {suggestion.itemName}: {suggestion.requiredAmount} {suggestion.unit}
+              {suggestion.itemName}: {suggestion.suggestedPurchaseAmount} {suggestion.unit}
+              {suggestion.expiringSoonAmount > 0 && <> (+{suggestion.expiringSoonAmount} about to expire)</>}
               <button style={{ marginLeft: 8 }} onClick={() => onCreateFromSuggestion(suggestion)}>
                 Add to Shopping List
               </button>

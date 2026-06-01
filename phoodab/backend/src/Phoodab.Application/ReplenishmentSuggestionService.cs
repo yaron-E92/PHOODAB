@@ -28,20 +28,26 @@ public sealed class ReplenishmentSuggestionService
             }
 
             entriesByItem.TryGetValue(rule.ItemDefinitionId, out var entries);
-            var currentAndValid = GetCurrentAmount(entries, rule.Unit);
+            var currentAndValid = GetCurrentAmount(entries, rule.Unit, todayUtc);
             if (!currentAndValid.isValid)
             {
                 continue;
             }
 
-            var requiredAmount = Math.Max(0, rule.TargetAmount.Value - currentAndValid.currentAmount);
+            var expiringSoonAmount = GetExpiringSoonAmount(entries, rule.Unit, todayUtc, rule.ExpiryWarningDays);
+            var deficitAmount = Math.Max(0, rule.TargetAmount.Value - currentAndValid.currentAmount);
+            var suggestedPurchaseAmount = deficitAmount + expiringSoonAmount;
             var readModels = entries?.Select(entry => ConsumableEntryReadModel.From(entry, todayUtc, rule.ExpiryWarningDays)).ToList() ?? new List<ConsumableEntryReadModel>();
             results.Add(new ReplenishmentSuggestionReadModel(
                 rule.ItemDefinitionId,
                 entries?.FirstOrDefault()?.ItemDefinition.Name ?? "Unknown Item",
                 currentAndValid.currentAmount,
+                currentAndValid.currentAmount,
                 rule.TargetAmount.Value,
-                requiredAmount,
+                deficitAmount,
+                expiringSoonAmount,
+                suggestedPurchaseAmount,
+                suggestedPurchaseAmount,
                 rule.Unit.Value,
                 readModels));
         }
@@ -49,7 +55,7 @@ public sealed class ReplenishmentSuggestionService
         return results;
     }
 
-    private static (decimal currentAmount, bool isValid) GetCurrentAmount(IReadOnlyList<ConsumableEntry>? entries, Unit expectedUnit)
+    private static (decimal currentAmount, bool isValid) GetCurrentAmount(IReadOnlyList<ConsumableEntry>? entries, Unit expectedUnit, DateOnly todayUtc)
     {
         if (entries is null)
         {
@@ -61,7 +67,22 @@ public sealed class ReplenishmentSuggestionService
             return (0, false);
         }
 
-        return (entries.Sum(entry => entry.Quantity.Value), true);
+        return (entries.Where(entry => entry.ExpiresOn is not { } expiresOn || expiresOn >= todayUtc)
+            .Sum(entry => entry.Quantity.Value), true);
+    }
+
+    private static decimal GetExpiringSoonAmount(IReadOnlyList<ConsumableEntry>? entries, Unit expectedUnit, DateOnly todayUtc, int expiryWarningDays)
+    {
+        if (entries is null)
+        {
+            return 0;
+        }
+
+        var warningEnd = todayUtc.AddDays(expiryWarningDays);
+        return entries
+            .Where(entry => string.Equals(entry.Unit.Value, expectedUnit.Value, StringComparison.OrdinalIgnoreCase))
+            .Where(entry => entry.ExpiresOn is { } expiresOn && expiresOn >= todayUtc && expiresOn <= warningEnd)
+            .Sum(entry => entry.Quantity.Value);
     }
 
 }

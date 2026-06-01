@@ -518,12 +518,20 @@ public class SmokeTests
     [Test]
     public async Task Vertical_slice_suggestion_can_create_and_purchase_shopping_list_item()
     {
-        var itemResponse = await _client.PostAsJsonAsync("/api/item-definitions", new { name = "Oats", kind = ItemKind.Consumable });
+        var itemResponse = await _client.PostAsJsonAsync("/api/item-definitions", new { name = "Oats", kind = ItemKind.Consumable, desiredAmount = 5m, desiredUnit = "bag" });
         Assert.That(itemResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
         var item = JsonSerializer.Deserialize<JsonElement>(await itemResponse.Content.ReadAsStringAsync());
         var itemId = item.GetProperty("id").GetGuid();
 
-        var entryResponse = await _client.PostAsJsonAsync("/api/consumable-entries", new { itemDefinitionId = itemId, quantity = 1m, unit = "bag", expiresOn = (DateOnly?)null, storageSlotId = (Guid?)null });
+        var rule = await GetRuleForItem(itemId);
+        var rulePatchResponse = await _client.PatchAsJsonAsync($"/api/replenishment/rules/{rule.GetProperty("id").GetGuid()}", new { expiryWarningDays = 3 });
+        Assert.That(rulePatchResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+
+        var entryResponse = await _client.PostAsJsonAsync("/api/consumable-entries", new { itemDefinitionId = itemId, quantity = 1m, unit = "bag", expiresOn = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(-1)), storageSlotId = (Guid?)null });
+        Assert.That(entryResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        entryResponse = await _client.PostAsJsonAsync("/api/consumable-entries", new { itemDefinitionId = itemId, quantity = 1m, unit = "bag", expiresOn = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(2)), storageSlotId = (Guid?)null });
+        Assert.That(entryResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        entryResponse = await _client.PostAsJsonAsync("/api/consumable-entries", new { itemDefinitionId = itemId, quantity = 2m, unit = "bag", expiresOn = (DateOnly?)null, storageSlotId = (Guid?)null });
         Assert.That(entryResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
 
         var summary = JsonSerializer.Deserialize<JsonElement>(await (await _client.GetAsync("/api/inventory/summary")).Content.ReadAsStringAsync()).EnumerateArray().ToList();
@@ -531,15 +539,34 @@ public class SmokeTests
 
         var suggestions = JsonSerializer.Deserialize<JsonElement>(await (await _client.GetAsync("/api/replenishment/suggestions")).Content.ReadAsStringAsync()).EnumerateArray().ToList();
         var suggestion = suggestions.Single(x => x.GetProperty("itemDefinitionId").GetGuid() == itemId);
+        Assert.Multiple(() =>
+        {
+            Assert.That(suggestion.GetProperty("usableCurrentQuantity").GetDecimal(), Is.EqualTo(3m));
+            Assert.That(suggestion.GetProperty("desiredQuantity").GetDecimal(), Is.EqualTo(5m));
+            Assert.That(suggestion.GetProperty("deficitAmount").GetDecimal(), Is.EqualTo(2m));
+            Assert.That(suggestion.GetProperty("expiringSoonAmount").GetDecimal(), Is.EqualTo(1m));
+            Assert.That(suggestion.GetProperty("suggestedPurchaseAmount").GetDecimal(), Is.EqualTo(3m));
+            Assert.That(suggestion.GetProperty("requiredAmount").GetDecimal(), Is.EqualTo(3m));
+        });
 
         var createShoppingItemResponse = await _client.PostAsJsonAsync("/api/shopping-list-items/from-suggestion", new
         {
             itemDefinitionId = itemId,
-            quantity = suggestion.GetProperty("requiredAmount").GetDecimal(),
-            unit = suggestion.GetProperty("unit").GetString()
+            quantity = suggestion.GetProperty("suggestedPurchaseAmount").GetDecimal(),
+            unit = suggestion.GetProperty("unit").GetString(),
+            deficitAmount = suggestion.GetProperty("deficitAmount").GetDecimal(),
+            expiringSoonAmount = suggestion.GetProperty("expiringSoonAmount").GetDecimal(),
+            suggestedPurchaseAmount = suggestion.GetProperty("suggestedPurchaseAmount").GetDecimal()
         });
         Assert.That(createShoppingItemResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
         var shoppingItem = JsonSerializer.Deserialize<JsonElement>(await createShoppingItemResponse.Content.ReadAsStringAsync());
+        Assert.Multiple(() =>
+        {
+            Assert.That(shoppingItem.GetProperty("quantity").GetDecimal(), Is.EqualTo(3m));
+            Assert.That(shoppingItem.GetProperty("sourceDeficitAmount").GetDecimal(), Is.EqualTo(2m));
+            Assert.That(shoppingItem.GetProperty("sourceExpiringSoonAmount").GetDecimal(), Is.EqualTo(1m));
+            Assert.That(shoppingItem.GetProperty("sourceSuggestedPurchaseAmount").GetDecimal(), Is.EqualTo(3m));
+        });
 
         var patchResponse = await _client.PatchAsJsonAsync($"/api/shopping-list-items/{shoppingItem.GetProperty("id").GetGuid()}", new { isResolved = true, isPurchased = true });
         Assert.That(patchResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));

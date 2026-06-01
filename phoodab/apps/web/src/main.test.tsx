@@ -111,9 +111,13 @@ describe('pantry mvp page', () => {
       {
         itemDefinitionId: 'item-1',
         itemName: 'Milk',
-        requiredAmount: 4,
+        requiredAmount: 5,
         desiredQuantity: 10,
-        currentQuantity: 6,
+        currentQuantity: 7,
+        usableCurrentQuantity: 7,
+        deficitAmount: 3,
+        expiringSoonAmount: 2,
+        suggestedPurchaseAmount: 5,
         unit: 'liter',
         entries: []
       }
@@ -131,10 +135,53 @@ describe('pantry mvp page', () => {
     });
 
     expect(container.textContent).toContain('Milk - 1 liter - Soon');
-    expect(container.textContent).toContain('Milk: 4 liter');
+    expect(container.textContent).toContain('Milk: 5 liter (+2 about to expire)');
     expect(container.textContent).toContain('Milk');
     expect(container.textContent).toContain('Expired');
     expect(container.textContent).toContain('slot-1');
+  });
+
+  it('uses backend suggested purchase amount and source context when adding a suggestion to shopping list', async () => {
+    getReplenishmentSuggestionsMock.mockResolvedValue([
+      {
+        itemDefinitionId: 'item-1',
+        itemName: 'Milk',
+        requiredAmount: 5,
+        desiredQuantity: 10,
+        currentQuantity: 7,
+        usableCurrentQuantity: 7,
+        deficitAmount: 3,
+        expiringSoonAmount: 2,
+        suggestedPurchaseAmount: 5,
+        unit: 'liter',
+        entries: []
+      }
+    ]);
+
+    const { App } = await import('./main');
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<App />);
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Add to Shopping List')!.click();
+      await Promise.resolve();
+    });
+
+    expect(createShoppingListItemFromSuggestionMock).toHaveBeenCalledWith('http://localhost:5199', {
+      itemDefinitionId: 'item-1',
+      quantity: 5,
+      unit: 'liter',
+      deficitAmount: 3,
+      expiringSoonAmount: 2,
+      suggestedPurchaseAmount: 5
+    });
   });
 
   it('updates consumable entries and refreshes pantry data', async () => {

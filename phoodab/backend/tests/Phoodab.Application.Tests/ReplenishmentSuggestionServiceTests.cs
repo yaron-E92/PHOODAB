@@ -123,6 +123,28 @@ public class ReplenishmentSuggestionServiceTests
         Assert.That(entries.Select(entry => entry.ExpiryStatus), Is.EquivalentTo(new[] { "Urgent", "Safe" }));
     }
 
+    [Test]
+    public void Suggestion_separates_usable_deficit_expiring_and_total_purchase_amounts()
+    {
+        var item = new ItemDefinition(Guid.NewGuid(), "Milk", ItemKind.Consumable);
+        var expiredEntry = new ConsumableEntry(Guid.NewGuid(), item, Quantity.From(2), new Unit("liter"), Today.AddDays(-1));
+        var expiringEntry = new ConsumableEntry(Guid.NewGuid(), item, Quantity.From(1), new Unit("liter"), Today.AddDays(2));
+        var safeEntry = new ConsumableEntry(Guid.NewGuid(), item, Quantity.From(2), new Unit("liter"), Today.AddDays(7));
+        var rule = new ReplenishmentRule(Guid.NewGuid(), item.Id, Quantity.From(5), new Unit("liter"), expiryWarningDays: 2);
+
+        var suggestion = CreateService().GetSuggestions(new[] { rule }, new[] { expiredEntry, expiringEntry, safeEntry }).Single();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(suggestion.UsableCurrentQuantity, Is.EqualTo(3m));
+            Assert.That(suggestion.DesiredQuantity, Is.EqualTo(5m));
+            Assert.That(suggestion.DeficitAmount, Is.EqualTo(2m));
+            Assert.That(suggestion.ExpiringSoonAmount, Is.EqualTo(1m));
+            Assert.That(suggestion.SuggestedPurchaseAmount, Is.EqualTo(3m));
+            Assert.That(suggestion.RequiredAmount, Is.EqualTo(3m));
+        });
+    }
+
     private static ReplenishmentSuggestionService CreateService(DateOnly? today = null)
         => new(new FakeUtcDateProvider(today ?? Today));
 
