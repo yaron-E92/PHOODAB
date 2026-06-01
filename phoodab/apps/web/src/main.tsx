@@ -207,7 +207,7 @@ export function App() {
         <ul>
           {expiringEntries.map((entry) => (
             <li key={entry.entryId}>
-              {entry.quantity} {entry.unit} - {entry.expiryStatus}
+              {entry.itemName} - {entry.quantity} {entry.unit} - {entry.expiryStatus}
             </li>
           ))}
         </ul>

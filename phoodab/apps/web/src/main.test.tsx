@@ -79,6 +79,7 @@ describe('pantry mvp page', () => {
     getExpiringConsumableEntriesMock.mockResolvedValue([
       {
         entryId: 'entry-1',
+        itemName: 'Milk',
         quantity: 1,
         unit: 'liter',
         expiresOn: '2026-06-01',
@@ -109,7 +110,7 @@ describe('pantry mvp page', () => {
       await Promise.resolve();
     });
 
-    expect(container.textContent).toContain('1 liter - Soon');
+    expect(container.textContent).toContain('Milk - 1 liter - Soon');
     expect(container.textContent).toContain('Milk: 4 liter');
   });
 

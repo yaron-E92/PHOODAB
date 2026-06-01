@@ -4,6 +4,7 @@ namespace Phoodab.Application;
 
 public sealed record ConsumableEntryReadModel(
     Guid EntryId,
+    string ItemName,
     decimal Quantity,
     string Unit,
     DateOnly? ExpiresOn,
@@ -15,6 +16,7 @@ public sealed record ConsumableEntryReadModel(
         int? expiresInDays = entry.ExpiresOn is null ? null : entry.ExpiresOn.Value.DayNumber - todayUtc.DayNumber;
         return new ConsumableEntryReadModel(
             entry.Id,
+            entry.ItemDefinition.Name,
             entry.Quantity.Value,
             entry.Unit.Value,
             entry.ExpiresOn,

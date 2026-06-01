@@ -22,6 +22,7 @@ export type InventorySummaryItem = {
 
 export type ExpiringConsumableEntry = {
   entryId: string;
+  itemName: string;
   quantity: number;
   unit: string;
   expiresOn: string | null;
