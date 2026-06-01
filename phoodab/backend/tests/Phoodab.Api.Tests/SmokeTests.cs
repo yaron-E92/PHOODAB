@@ -201,6 +201,7 @@ public class SmokeTests
         var expiringEntries = JsonSerializer.Deserialize<JsonElement>(await (await _client.GetAsync("/api/consumable-entries/expiring")).Content.ReadAsStringAsync())
             .EnumerateArray().ToList();
         var expiringEntry = expiringEntries.Single(x => x.GetProperty("entryId").GetGuid() == entryId);
+        Assert.That(expiringEntry.GetProperty("itemName").GetString(), Is.EqualTo("Milk"));
         Assert.That(expiringEntry.GetProperty("expiresInDays").GetInt32(), Is.LessThan(0));
         Assert.That(expiringEntry.GetProperty("expiryStatus").GetString(), Is.EqualTo("Expired"));
     }
