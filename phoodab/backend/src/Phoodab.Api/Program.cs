@@ -116,7 +116,13 @@ app.MapPatch("/api/replenishment/rules/{ruleId:guid}", (Guid ruleId, UpdateReple
 
 app.MapPost("/api/shopping-list-items/from-suggestion", (CreateShoppingListItemFromSuggestionRequest request, IInventoryMvpStore store) =>
 {
-    var item = store.CreateOrUpdateShoppingListItemFromSuggestion(request.ItemDefinitionId, request.Quantity, request.Unit);
+    var item = store.CreateOrUpdateShoppingListItemFromSuggestion(
+        request.ItemDefinitionId,
+        request.Quantity,
+        request.Unit,
+        request.DeficitAmount,
+        request.ExpiringSoonAmount,
+        request.SuggestedPurchaseAmount);
     return Results.Ok(item);
 }).WithOpenApi();
 
@@ -155,7 +161,7 @@ public sealed record CreateItemDefinitionRequest(string Name, ItemKind Kind, dec
 public sealed record CreateDurableEntryRequest(Guid ItemDefinitionId, Guid? StorageSlotId);
 public sealed record CreateConsumableEntryRequest(Guid ItemDefinitionId, decimal Quantity, string Unit, DateOnly? ExpiresOn, Guid? StorageSlotId);
 public sealed record UpdateConsumableEntryRequest(decimal Quantity, string Unit, DateOnly? ExpiresOn, Guid? StorageSlotId);
-public sealed record CreateShoppingListItemFromSuggestionRequest(Guid ItemDefinitionId, decimal Quantity, string Unit);
+public sealed record CreateShoppingListItemFromSuggestionRequest(Guid ItemDefinitionId, decimal Quantity, string Unit, decimal? DeficitAmount, decimal? ExpiringSoonAmount, decimal? SuggestedPurchaseAmount);
 public sealed record UpdateShoppingListItemStatusRequest(bool? IsResolved, bool? IsPurchased);
 public sealed record UpdateReplenishmentRuleRequest(decimal? DesiredAmount, string? DesiredUnit, bool? IsDisabled, int? ExpiryWarningDays);
 public sealed record ReplenishmentRuleResponse(

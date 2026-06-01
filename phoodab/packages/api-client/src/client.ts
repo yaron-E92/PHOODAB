@@ -41,7 +41,11 @@ export type ReplenishmentSuggestion = {
   itemDefinitionId: string;
   itemName: string;
   currentQuantity: number;
+  usableCurrentQuantity: number;
   desiredQuantity: number;
+  deficitAmount: number;
+  expiringSoonAmount: number;
+  suggestedPurchaseAmount: number;
   requiredAmount: number;
   unit: string;
   entries: {
@@ -64,6 +68,9 @@ export type ShoppingListItem = {
   unit: string;
   isResolved: boolean;
   isPurchased: boolean;
+  sourceDeficitAmount: number | null;
+  sourceExpiringSoonAmount: number | null;
+  sourceSuggestedPurchaseAmount: number | null;
 };
 
 export async function getHealth(baseUrl: string): Promise<HealthResponse> {
@@ -173,7 +180,7 @@ export async function updateReplenishmentRule(
   return response.json();
 }
 
-export async function createShoppingListItemFromSuggestion(baseUrl: string, payload: { itemDefinitionId: string; quantity: number; unit: string }): Promise<ShoppingListItem> {
+export async function createShoppingListItemFromSuggestion(baseUrl: string, payload: { itemDefinitionId: string; quantity: number; unit: string; deficitAmount?: number | null; expiringSoonAmount?: number | null; suggestedPurchaseAmount?: number | null }): Promise<ShoppingListItem> {
   const response = await fetch(`${baseUrl}/api/shopping-list-items/from-suggestion`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

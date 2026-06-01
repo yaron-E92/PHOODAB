@@ -16,7 +16,7 @@ public interface IInventoryMvpStore
     ReplenishmentRule? UpdateRule(Guid ruleId, decimal? desiredAmount, string? desiredUnit, bool? isDisabled, int? expiryWarningDays);
     IReadOnlyList<ConsumableEntry> GetConsumableEntries();
     void EnsureDevelopmentSeedData(DateOnly todayUtc);
-    object CreateOrUpdateShoppingListItemFromSuggestion(Guid itemDefinitionId, decimal quantity, string unit);
+    object CreateOrUpdateShoppingListItemFromSuggestion(Guid itemDefinitionId, decimal quantity, string unit, decimal? deficitAmount, decimal? expiringSoonAmount, decimal? suggestedPurchaseAmount);
     object? UpdateShoppingListItemStatus(Guid shoppingListItemId, bool? isResolved, bool? isPurchased);
     IReadOnlyList<object> GetShoppingListItems();
 }
@@ -244,7 +244,7 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
         }
     }
 
-    public object CreateOrUpdateShoppingListItemFromSuggestion(Guid itemDefinitionId, decimal quantity, string unit)
+    public object CreateOrUpdateShoppingListItemFromSuggestion(Guid itemDefinitionId, decimal quantity, string unit, decimal? deficitAmount, decimal? expiringSoonAmount, decimal? suggestedPurchaseAmount)
     {
         lock (_sync)
         {
@@ -255,14 +255,21 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
             var existing = state.ShoppingListItems.SingleOrDefault(x => x.ItemDefinitionId == itemDefinitionId && !x.IsResolved && !x.IsPurchased);
             if (existing is not null)
             {
-                var updated = existing with { Quantity = quantity, Unit = unit };
+                var updated = existing with
+                {
+                    Quantity = quantity,
+                    Unit = unit,
+                    SourceDeficitAmount = deficitAmount,
+                    SourceExpiringSoonAmount = expiringSoonAmount,
+                    SourceSuggestedPurchaseAmount = suggestedPurchaseAmount ?? quantity
+                };
                 state.ShoppingListItems.Remove(existing);
                 state.ShoppingListItems.Add(updated);
                 SaveState(state);
                 return ToShoppingListReadModel(updated, itemDefinition.Name);
             }
 
-            var created = new ShoppingListItemState(Guid.NewGuid(), itemDefinitionId, itemDefinition.Name, quantity, unit, false, false);
+            var created = new ShoppingListItemState(Guid.NewGuid(), itemDefinitionId, itemDefinition.Name, quantity, unit, false, false, deficitAmount, expiringSoonAmount, suggestedPurchaseAmount ?? quantity);
             state.ShoppingListItems.Add(created);
             SaveState(state);
             return ToShoppingListReadModel(created, itemDefinition.Name);
@@ -431,7 +438,10 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
         quantity = state.Quantity,
         unit = state.Unit,
         isResolved = state.IsResolved,
-        isPurchased = state.IsPurchased
+        isPurchased = state.IsPurchased,
+        sourceDeficitAmount = state.SourceDeficitAmount,
+        sourceExpiringSoonAmount = state.SourceExpiringSoonAmount,
+        sourceSuggestedPurchaseAmount = state.SourceSuggestedPurchaseAmount
     };
 
     private static ConsumableEntryReadModel ToConsumableEntryReadModel(InventoryMvpState state, ConsumableEntryState entryState, DateOnly todayUtc)
@@ -447,5 +457,5 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
     private sealed record DurableEntryState(Guid Id, Guid ItemDefinitionId, Guid? StorageSlotId);
     private sealed record ConsumableEntryState(Guid Id, Guid ItemDefinitionId, decimal Quantity, string Unit, DateOnly? ExpiresOn, Guid? StorageSlotId);
     private sealed record ReplenishmentRuleState(Guid Id, Guid ItemDefinitionId, decimal? TargetAmount, string? Unit, int? ExpiryWarningDays, bool IsHidden, bool? IsDisabled);
-    private sealed record ShoppingListItemState(Guid Id, Guid ItemDefinitionId, string ItemName, decimal Quantity, string Unit, bool IsResolved, bool IsPurchased);
+    private sealed record ShoppingListItemState(Guid Id, Guid ItemDefinitionId, string ItemName, decimal Quantity, string Unit, bool IsResolved, bool IsPurchased, decimal? SourceDeficitAmount = null, decimal? SourceExpiringSoonAmount = null, decimal? SourceSuggestedPurchaseAmount = null);
 }

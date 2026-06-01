@@ -556,6 +556,12 @@ export interface components {
             /** Format: double */
             quantity?: number;
             unit?: string | null;
+            /** Format: double */
+            deficitAmount?: number | null;
+            /** Format: double */
+            expiringSoonAmount?: number | null;
+            /** Format: double */
+            suggestedPurchaseAmount?: number | null;
         };
         HealthResponse: {
             status: string;
