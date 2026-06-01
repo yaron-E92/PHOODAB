@@ -189,6 +189,74 @@ describe('pantry mvp page', () => {
     });
   });
 
+  it('labels replenishment rule fields and saves clarified values', async () => {
+    getInventorySummaryMock.mockResolvedValue([
+      {
+        itemDefinitionId: 'item-1',
+        itemName: 'Milk',
+        totalQuantity: 1,
+        unit: 'liter',
+        entryCount: 1,
+        hasMixedUnits: false,
+        mixedUnitWarning: null
+      }
+    ]);
+    getReplenishmentRulesMock.mockResolvedValue([
+      {
+        id: 'rule-1',
+        itemDefinitionId: 'item-1',
+        desiredAmount: 2,
+        desiredUnit: 'liter',
+        expiryWarningDays: 3,
+        isDisabled: false
+      }
+    ]);
+
+    const { App } = await import('./main');
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<App />);
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain('Target amount');
+    expect(container.textContent).toContain('Amount to keep stocked before replenishment is suggested.');
+    expect(container.textContent).toContain('Expiry warning days');
+    expect(container.textContent).toContain('Treat entries expiring within this many days as warning items.');
+
+    const targetAmountInput = container.querySelector('input[aria-label="Target amount for Milk"]') as HTMLInputElement;
+    const targetUnitInput = container.querySelector('input[aria-label="Target unit for Milk"]') as HTMLInputElement;
+    const expiryWarningInput = container.querySelector('input[aria-label="Expiry warning days for Milk"]') as HTMLInputElement;
+    const disabledInput = container.querySelector('input[aria-label="Disable replenishment rule for Milk"]') as HTMLInputElement;
+
+    await act(async () => {
+      targetAmountInput.value = '4';
+      targetAmountInput.dispatchEvent(new Event('input', { bubbles: true }));
+      targetUnitInput.value = 'carton';
+      targetUnitInput.dispatchEvent(new Event('input', { bubbles: true }));
+      expiryWarningInput.value = '5';
+      expiryWarningInput.dispatchEvent(new Event('input', { bubbles: true }));
+      disabledInput.checked = true;
+      disabledInput.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    await act(async () => {
+      Array.from(container.querySelectorAll('button')).find((button) => button.getAttribute('aria-label') === 'Save replenishment rule for Milk')!.click();
+      await Promise.resolve();
+    });
+
+    expect(updateReplenishmentRuleMock).toHaveBeenCalledWith('http://localhost:5199', 'rule-1', {
+      desiredAmount: 4,
+      desiredUnit: 'carton',
+      expiryWarningDays: 5,
+      isDisabled: true
+    });
+  });
+
   it('updates consumable entries and refreshes pantry data', async () => {
     getConsumableEntriesMock.mockResolvedValue([
       {
