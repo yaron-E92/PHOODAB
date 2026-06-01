@@ -319,18 +319,26 @@ export function App() {
       {!isLoading && !error && suggestions.length === 0 && <p>No replenishment needed.</p>}
       {!isLoading && !error && suggestions.length > 0 && (
         <ul>
-          {suggestions.map((suggestion) => (
-            <li key={suggestion.itemDefinitionId}>
-              {suggestion.itemName}: {suggestion.suggestedPurchaseAmount} {suggestion.unit}
-              {suggestion.expiringSoonAmount > 0 && <> (+{suggestion.expiringSoonAmount} about to expire)</>}
-              <div>
-                Breakdown: desired {suggestion.desiredQuantity} {suggestion.unit}; usable {suggestion.usableCurrentQuantity} {suggestion.unit}; deficit {suggestion.deficitAmount} {suggestion.unit}; expiring soon {suggestion.expiringSoonAmount} {suggestion.unit}
-              </div>
-              <button style={{ marginLeft: 8 }} onClick={() => onCreateFromSuggestion(suggestion)}>
-                Add to Shopping List
-              </button>
-            </li>
-          ))}
+          {suggestions.map((suggestion) => {
+            const breakdown = `Breakdown: desired ${suggestion.desiredQuantity} ${suggestion.unit}; usable ${suggestion.usableCurrentQuantity} ${suggestion.unit}; deficit ${suggestion.deficitAmount} ${suggestion.unit}; expiring soon ${suggestion.expiringSoonAmount} ${suggestion.unit}`;
+            return (
+              <li key={suggestion.itemDefinitionId}>
+                {suggestion.itemName}: {suggestion.suggestedPurchaseAmount} {suggestion.unit}
+                {suggestion.expiringSoonAmount > 0 && <> (+{suggestion.expiringSoonAmount} about to expire)</>}
+                <span
+                  aria-label={breakdown}
+                  tabIndex={0}
+                  title={breakdown}
+                  style={{ marginLeft: 8, textDecoration: 'underline dotted', cursor: 'help' }}
+                >
+                  Breakdown
+                </span>
+                <button style={{ marginLeft: 8 }} onClick={() => onCreateFromSuggestion(suggestion)}>
+                  Add to Shopping List
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
 
