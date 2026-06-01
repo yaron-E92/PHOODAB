@@ -135,7 +135,8 @@ describe('pantry mvp page', () => {
     });
 
     expect(container.textContent).toContain('Milk - 1 liter - Soon');
-    expect(container.textContent).toContain('Milk: 5 liter (+2 about to expire)');
+    expect(container.textContent).toContain('Milk: 5 liter (2 about to expire)');
+    expect(container.textContent).not.toContain('(+2 about to expire)');
     const breakdown = 'Breakdown: desired 10 liter; usable 7 liter; deficit 3 liter; expiring soon 2 liter';
     const breakdownTrigger = container.querySelector(`[aria-label="${breakdown}"]`);
     expect(breakdownTrigger?.textContent).toContain('Breakdown');

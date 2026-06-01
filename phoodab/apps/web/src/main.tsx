@@ -324,7 +324,7 @@ export function App() {
             return (
               <li key={suggestion.itemDefinitionId}>
                 {suggestion.itemName}: {suggestion.suggestedPurchaseAmount} {suggestion.unit}
-                {suggestion.expiringSoonAmount > 0 && <> (+{suggestion.expiringSoonAmount} about to expire)</>}
+                {suggestion.expiringSoonAmount > 0 && <> ({suggestion.expiringSoonAmount} about to expire)</>}
                 <span
                   aria-label={breakdown}
                   tabIndex={0}
