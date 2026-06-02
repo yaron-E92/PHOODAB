@@ -566,13 +566,39 @@ public class SmokeTests
             Assert.That(shoppingItem.GetProperty("sourceDeficitAmount").GetDecimal(), Is.EqualTo(2m));
             Assert.That(shoppingItem.GetProperty("sourceExpiringSoonAmount").GetDecimal(), Is.EqualTo(1m));
             Assert.That(shoppingItem.GetProperty("sourceSuggestedPurchaseAmount").GetDecimal(), Is.EqualTo(3m));
+            Assert.That(shoppingItem.GetProperty("status").GetString(), Is.EqualTo("ShoppingList"));
+            Assert.That(shoppingItem.GetProperty("stockUpdateNeeded").GetBoolean(), Is.False);
         });
 
-        var patchResponse = await _client.PatchAsJsonAsync($"/api/shopping-list-items/{shoppingItem.GetProperty("id").GetGuid()}", new { isResolved = true, isPurchased = true });
+        var patchResponse = await _client.PatchAsJsonAsync($"/api/shopping-list-items/{shoppingItem.GetProperty("id").GetGuid()}", new { status = "InCart" });
         Assert.That(patchResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
         var patched = JsonSerializer.Deserialize<JsonElement>(await patchResponse.Content.ReadAsStringAsync());
-        Assert.That(patched.GetProperty("isResolved").GetBoolean(), Is.True);
-        Assert.That(patched.GetProperty("isPurchased").GetBoolean(), Is.True);
+        Assert.Multiple(() =>
+        {
+            Assert.That(patched.GetProperty("status").GetString(), Is.EqualTo("InCart"));
+            Assert.That(patched.GetProperty("isResolved").GetBoolean(), Is.False);
+            Assert.That(patched.GetProperty("isPurchased").GetBoolean(), Is.False);
+            Assert.That(patched.GetProperty("stockUpdateNeeded").GetBoolean(), Is.False);
+        });
+
+        patchResponse = await _client.PatchAsJsonAsync($"/api/shopping-list-items/{shoppingItem.GetProperty("id").GetGuid()}", new { status = "Bought" });
+        Assert.That(patchResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        patched = JsonSerializer.Deserialize<JsonElement>(await patchResponse.Content.ReadAsStringAsync());
+        Assert.Multiple(() =>
+        {
+            Assert.That(patched.GetProperty("status").GetString(), Is.EqualTo("Bought"));
+            Assert.That(patched.GetProperty("isResolved").GetBoolean(), Is.True);
+            Assert.That(patched.GetProperty("isPurchased").GetBoolean(), Is.True);
+            Assert.That(patched.GetProperty("stockUpdateNeeded").GetBoolean(), Is.False);
+            Assert.That(patched.GetProperty("nextInventoryAction").ValueKind, Is.EqualTo(JsonValueKind.Null));
+        });
+
+        var deleteResponse = await _client.DeleteAsync($"/api/shopping-list-items/{shoppingItem.GetProperty("id").GetGuid()}");
+        Assert.That(deleteResponse.StatusCode, Is.EqualTo(HttpStatusCode.NoContent));
+
+        var shoppingItems = JsonSerializer.Deserialize<JsonElement>(await (await _client.GetAsync("/api/shopping-list-items")).Content.ReadAsStringAsync())
+            .EnumerateArray().ToList();
+        Assert.That(shoppingItems.Any(x => x.GetProperty("id").GetGuid() == shoppingItem.GetProperty("id").GetGuid()), Is.False);
     }
 
     private async Task<Guid> CreateConsumableItem(string name, decimal? desiredAmount = null, string? desiredUnit = null)

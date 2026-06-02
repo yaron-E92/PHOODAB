@@ -17,7 +17,8 @@ public interface IInventoryMvpStore
     IReadOnlyList<ConsumableEntry> GetConsumableEntries();
     void EnsureDevelopmentSeedData(DateOnly todayUtc);
     object CreateOrUpdateShoppingListItemFromSuggestion(Guid itemDefinitionId, decimal quantity, string unit, decimal? deficitAmount, decimal? expiringSoonAmount, decimal? suggestedPurchaseAmount);
-    object? UpdateShoppingListItemStatus(Guid shoppingListItemId, bool? isResolved, bool? isPurchased);
+    object? UpdateShoppingListItemStatus(Guid shoppingListItemId, bool? isResolved, bool? isPurchased, string? status);
+    bool DeleteShoppingListItem(Guid shoppingListItemId);
     IReadOnlyList<object> GetShoppingListItems();
 }
 
@@ -27,6 +28,11 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
     private const decimal DefaultDesiredAmount = 2m;
     private const string DefaultDesiredUnit = "unit";
     private const int DefaultExpiryWarningDays = 2;
+    private const string ShoppingStatusShoppingList = "ShoppingList";
+    private const string ShoppingStatusInCart = "InCart";
+    private const string ShoppingStatusBought = "Bought";
+    private const string ShoppingStatusStockUpdateNeeded = "StockUpdateNeeded";
+    private const string StockUpdateAction = "Add stock details for quantity, lot, expiry, and location.";
 
     private readonly string _storePath;
     private readonly object _sync = new();
@@ -269,14 +275,14 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
                 return ToShoppingListReadModel(updated, itemDefinition.Name);
             }
 
-            var created = new ShoppingListItemState(Guid.NewGuid(), itemDefinitionId, itemDefinition.Name, quantity, unit, false, false, deficitAmount, expiringSoonAmount, suggestedPurchaseAmount ?? quantity);
+            var created = new ShoppingListItemState(Guid.NewGuid(), itemDefinitionId, itemDefinition.Name, quantity, unit, false, false, ShoppingStatusShoppingList, deficitAmount, expiringSoonAmount, suggestedPurchaseAmount ?? quantity);
             state.ShoppingListItems.Add(created);
             SaveState(state);
             return ToShoppingListReadModel(created, itemDefinition.Name);
         }
     }
 
-    public object? UpdateShoppingListItemStatus(Guid shoppingListItemId, bool? isResolved, bool? isPurchased)
+    public object? UpdateShoppingListItemStatus(Guid shoppingListItemId, bool? isResolved, bool? isPurchased, string? status)
     {
         lock (_sync)
         {
@@ -287,10 +293,24 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
                 return null;
             }
 
+            var nextStatus = NormalizeShoppingStatus(status) ?? DeriveShoppingStatus(existing);
+            var nextIsResolved = isResolved ?? existing.IsResolved;
+            var nextIsPurchased = isPurchased ?? existing.IsPurchased;
+
+            if (!string.IsNullOrWhiteSpace(status))
+            {
+                (nextIsResolved, nextIsPurchased) = GetCompatibilityFlags(nextStatus);
+            }
+            else if (isResolved.HasValue || isPurchased.HasValue)
+            {
+                nextStatus = DeriveShoppingStatus(nextIsResolved, nextIsPurchased, nextStatus);
+            }
+
             var updated = existing with
             {
-                IsResolved = isResolved ?? existing.IsResolved,
-                IsPurchased = isPurchased ?? existing.IsPurchased
+                IsResolved = nextIsResolved,
+                IsPurchased = nextIsPurchased,
+                Status = nextStatus
             };
 
             state.ShoppingListItems.Remove(existing);
@@ -309,6 +329,23 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
                 .Select(x => ToShoppingListReadModel(x, x.ItemName))
                 .Cast<object>()
                 .ToList();
+        }
+    }
+
+    public bool DeleteShoppingListItem(Guid shoppingListItemId)
+    {
+        lock (_sync)
+        {
+            var state = LoadState();
+            var existing = state.ShoppingListItems.SingleOrDefault(x => x.Id == shoppingListItemId);
+            if (existing is null)
+            {
+                return false;
+            }
+
+            state.ShoppingListItems.Remove(existing);
+            SaveState(state);
+            return true;
         }
     }
 
@@ -439,10 +476,60 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
         unit = state.Unit,
         isResolved = state.IsResolved,
         isPurchased = state.IsPurchased,
+        status = DeriveShoppingStatus(state),
+        stockUpdateNeeded = DeriveShoppingStatus(state) is ShoppingStatusStockUpdateNeeded,
+        nextInventoryAction = DeriveShoppingStatus(state) is ShoppingStatusStockUpdateNeeded ? StockUpdateAction : null,
         sourceDeficitAmount = state.SourceDeficitAmount,
         sourceExpiringSoonAmount = state.SourceExpiringSoonAmount,
         sourceSuggestedPurchaseAmount = state.SourceSuggestedPurchaseAmount
     };
+
+    private static string? NormalizeShoppingStatus(string? status)
+    {
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            return null;
+        }
+
+        return status.Trim().ToLowerInvariant() switch
+        {
+            "shoppinglist" or "shopping_list" or "shopping-list" or "list" => ShoppingStatusShoppingList,
+            "incart" or "in_cart" or "in-cart" or "cart" or "buying" => ShoppingStatusInCart,
+            "bought" or "purchased" => ShoppingStatusBought,
+            "stockupdateneeded" or "stock_update_needed" or "stock-update-needed" => ShoppingStatusStockUpdateNeeded,
+            _ => ShoppingStatusShoppingList
+        };
+    }
+
+    private static string DeriveShoppingStatus(ShoppingListItemState state)
+    {
+        return NormalizeShoppingStatus(state.Status) ?? DeriveShoppingStatus(state.IsResolved, state.IsPurchased, ShoppingStatusShoppingList);
+    }
+
+    private static string DeriveShoppingStatus(bool isResolved, bool isPurchased, string fallback)
+    {
+        if (isPurchased && isResolved)
+        {
+            return ShoppingStatusBought;
+        }
+
+        if (isPurchased)
+        {
+            return ShoppingStatusStockUpdateNeeded;
+        }
+
+        return fallback;
+    }
+
+    private static (bool IsResolved, bool IsPurchased) GetCompatibilityFlags(string status)
+    {
+        return status switch
+        {
+            ShoppingStatusBought => (true, true),
+            ShoppingStatusStockUpdateNeeded => (false, true),
+            _ => (false, false)
+        };
+    }
 
     private static ConsumableEntryReadModel ToConsumableEntryReadModel(InventoryMvpState state, ConsumableEntryState entryState, DateOnly todayUtc)
     {
@@ -457,5 +544,5 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
     private sealed record DurableEntryState(Guid Id, Guid ItemDefinitionId, Guid? StorageSlotId);
     private sealed record ConsumableEntryState(Guid Id, Guid ItemDefinitionId, decimal Quantity, string Unit, DateOnly? ExpiresOn, Guid? StorageSlotId);
     private sealed record ReplenishmentRuleState(Guid Id, Guid ItemDefinitionId, decimal? TargetAmount, string? Unit, int? ExpiryWarningDays, bool IsHidden, bool? IsDisabled);
-    private sealed record ShoppingListItemState(Guid Id, Guid ItemDefinitionId, string ItemName, decimal Quantity, string Unit, bool IsResolved, bool IsPurchased, decimal? SourceDeficitAmount = null, decimal? SourceExpiringSoonAmount = null, decimal? SourceSuggestedPurchaseAmount = null);
+    private sealed record ShoppingListItemState(Guid Id, Guid ItemDefinitionId, string ItemName, decimal Quantity, string Unit, bool IsResolved, bool IsPurchased, string? Status = null, decimal? SourceDeficitAmount = null, decimal? SourceExpiringSoonAmount = null, decimal? SourceSuggestedPurchaseAmount = null);
 }

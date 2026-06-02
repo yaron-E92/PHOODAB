@@ -16,6 +16,7 @@ const addConsumableEntryMock = vi.fn();
 const updateConsumableEntryMock = vi.fn();
 const createShoppingListItemFromSuggestionMock = vi.fn();
 const updateShoppingListItemStatusMock = vi.fn();
+const deleteShoppingListItemMock = vi.fn();
 const updateReplenishmentRuleMock = vi.fn();
 
 vi.mock('../../../packages/api-client/src/client', () => ({
@@ -32,6 +33,7 @@ vi.mock('../../../packages/api-client/src/client', () => ({
   updateConsumableEntry: updateConsumableEntryMock,
   createShoppingListItemFromSuggestion: createShoppingListItemFromSuggestionMock,
   updateShoppingListItemStatus: updateShoppingListItemStatusMock,
+  deleteShoppingListItem: deleteShoppingListItemMock,
   updateReplenishmentRule: updateReplenishmentRuleMock
 }));
 
@@ -191,6 +193,93 @@ describe('pantry mvp page', () => {
     });
   });
 
+  it('moves shopping items into cart and then bought with stock follow-up visible', async () => {
+    getShoppingListItemsMock.mockResolvedValue([
+      {
+        id: 'shopping-1',
+        itemDefinitionId: 'item-1',
+        itemName: 'Milk',
+        quantity: 5,
+        unit: 'liter',
+        isResolved: false,
+        isPurchased: false,
+        status: 'ShoppingList',
+        stockUpdateNeeded: false,
+        nextInventoryAction: null,
+        sourceDeficitAmount: 3,
+        sourceExpiringSoonAmount: 2,
+        sourceSuggestedPurchaseAmount: 5
+      },
+      {
+        id: 'shopping-2',
+        itemDefinitionId: 'item-2',
+        itemName: 'Eggs',
+        quantity: 1,
+        unit: 'dozen',
+        isResolved: false,
+        isPurchased: false,
+        status: 'InCart',
+        stockUpdateNeeded: false,
+        nextInventoryAction: null,
+        sourceDeficitAmount: 1,
+        sourceExpiringSoonAmount: 0,
+        sourceSuggestedPurchaseAmount: 1
+      },
+      {
+        id: 'shopping-3',
+        itemDefinitionId: 'item-3',
+        itemName: 'Rice',
+        quantity: 2,
+        unit: 'kg',
+        isResolved: true,
+        isPurchased: true,
+        status: 'Bought',
+        stockUpdateNeeded: false,
+        nextInventoryAction: null,
+        sourceDeficitAmount: 2,
+        sourceExpiringSoonAmount: 0,
+        sourceSuggestedPurchaseAmount: 2
+      }
+    ]);
+
+    const { App } = await import('./main');
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<App />);
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain('Milk: 5 liter [Added to shopping list]');
+    expect(container.textContent).toContain('Eggs: 1 dozen [In cart / buying]');
+    expect(container.textContent).toContain('Rice: 2 kg [Bought]');
+    expect(container.textContent).not.toContain('Stock update needed: Add stock details for quantity, lot, expiry, and location.');
+
+    await act(async () => {
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Add to Cart')!.click();
+      await Promise.resolve();
+    });
+
+    expect(updateShoppingListItemStatusMock).toHaveBeenCalledWith('http://localhost:5199', 'shopping-1', { status: 'InCart' });
+
+    await act(async () => {
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Mark Bought')!.click();
+      await Promise.resolve();
+    });
+
+    expect(updateShoppingListItemStatusMock).toHaveBeenCalledWith('http://localhost:5199', 'shopping-2', { status: 'Bought' });
+
+    await act(async () => {
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Remove Bought Item')!.click();
+      await Promise.resolve();
+    });
+
+    expect(deleteShoppingListItemMock).toHaveBeenCalledWith('http://localhost:5199', 'shopping-3');
+  });
+
   it('labels replenishment rule fields and saves clarified values', async () => {
     getInventorySummaryMock.mockResolvedValue([
       {
@@ -347,13 +436,19 @@ describe('pantry mvp page', () => {
     expect(container.textContent).toContain('Location: slot-1');
     expect(container.textContent).toContain('Add stock');
     expect(container.textContent).toContain('Consume stock');
+    expect(container.textContent).toContain('Add stock unit');
+    expect(container.textContent).toContain('Consume stock unit');
     expect(container.textContent).toContain('Mark Lot Depleted');
     expect(container.textContent).toContain('Undo Unsaved Changes');
 
     const addStockInput = container.querySelector('input[aria-label="Add stock amount for Milk lot entry-1"]') as HTMLInputElement;
+    const addStockUnitInput = container.querySelector('input[aria-label="Add stock unit for Milk lot entry-1"]') as HTMLInputElement;
+    expect(addStockUnitInput.value).toBe('liter');
     await act(async () => {
       addStockInput.value = '2';
       addStockInput.dispatchEvent(new Event('input', { bubbles: true }));
+      addStockUnitInput.value = 'liter';
+      addStockUnitInput.dispatchEvent(new Event('input', { bubbles: true }));
     });
 
     await act(async () => {
@@ -369,9 +464,13 @@ describe('pantry mvp page', () => {
     });
 
     const consumeStockInput = container.querySelector('input[aria-label="Consume stock amount for Milk lot entry-1"]') as HTMLInputElement;
+    const consumeStockUnitInput = container.querySelector('input[aria-label="Consume stock unit for Milk lot entry-1"]') as HTMLInputElement;
+    expect(consumeStockUnitInput.value).toBe('liter');
     await act(async () => {
       consumeStockInput.value = '3';
       consumeStockInput.dispatchEvent(new Event('input', { bubbles: true }));
+      consumeStockUnitInput.value = 'liter';
+      consumeStockUnitInput.dispatchEvent(new Event('input', { bubbles: true }));
     });
 
     await act(async () => {
@@ -441,9 +540,12 @@ describe('pantry mvp page', () => {
     expect(updateConsumableEntryMock).not.toHaveBeenCalled();
 
     const consumeStockInput = container.querySelector('input[aria-label="Consume stock amount for Milk lot entry-1"]') as HTMLInputElement;
+    const consumeStockUnitInput = container.querySelector('input[aria-label="Consume stock unit for Milk lot entry-1"]') as HTMLInputElement;
     await act(async () => {
       consumeStockInput.value = '2';
       consumeStockInput.dispatchEvent(new Event('input', { bubbles: true }));
+      consumeStockUnitInput.value = 'carton';
+      consumeStockUnitInput.dispatchEvent(new Event('input', { bubbles: true }));
     });
 
     await act(async () => {
@@ -451,7 +553,7 @@ describe('pantry mvp page', () => {
       await Promise.resolve();
     });
 
-    expect(container.textContent).toContain('Consume amount cannot exceed the lot quantity.');
+    expect(container.textContent).toContain('Consume stock unit must match the lot unit liter.');
     expect(updateConsumableEntryMock).not.toHaveBeenCalled();
   });
 

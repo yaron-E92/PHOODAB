@@ -13,6 +13,7 @@ import {
   getVersion,
   createShoppingListItemFromSuggestion,
   updateShoppingListItemStatus,
+  deleteShoppingListItem,
   updateConsumableEntry,
   type ConsumableEntry,
   updateReplenishmentRule,
@@ -27,7 +28,7 @@ import {
 const baseUrl = 'http://localhost:5199';
 
 type EntryEdit = { quantity: string; unit: string; expiresOn: string; storageSlotId: string };
-type EntryActionEdit = { addStock: string; consumeStock: string };
+type EntryActionEdit = { addStock: string; addStockUnit: string; consumeStock: string; consumeStockUnit: string };
 
 const toEntryEdit = (entry: ConsumableEntry): EntryEdit => ({
   quantity: String(entry.quantity),
@@ -36,7 +37,12 @@ const toEntryEdit = (entry: ConsumableEntry): EntryEdit => ({
   storageSlotId: entry.storageSlotId ?? ''
 });
 
-const emptyActionEdit: EntryActionEdit = { addStock: '', consumeStock: '' };
+const toEntryActionEdit = (entry: ConsumableEntry): EntryActionEdit => ({
+  addStock: '',
+  addStockUnit: entry.unit,
+  consumeStock: '',
+  consumeStockUnit: entry.unit
+});
 
 const parseQuantity = (value: string) => {
   const quantity = Number(value);
@@ -54,6 +60,25 @@ const getExpiryStyle = (expiryStatus: ConsumableEntry['expiryStatus']): React.CS
     return { background: '#fef9c3', borderLeft: '4px solid #ca8a04' };
   }
   return { borderLeft: '4px solid #16a34a' };
+};
+
+const getShoppingStatus = (item: ShoppingListItem): ShoppingListItem['status'] => {
+  if (item.status) return item.status;
+  if (item.isPurchased) return item.isResolved ? 'Bought' : 'StockUpdateNeeded';
+  return 'ShoppingList';
+};
+
+const getShoppingStatusLabel = (item: ShoppingListItem) => {
+  switch (getShoppingStatus(item)) {
+    case 'InCart':
+      return 'In cart / buying';
+    case 'Bought':
+      return 'Bought';
+    case 'StockUpdateNeeded':
+      return 'Stock update needed';
+    default:
+      return 'Added to shopping list';
+  }
 };
 
 export function App() {
@@ -99,7 +124,7 @@ export function App() {
       setSummary(summaryData);
       setConsumableEntries(entriesData);
       setEntryEdits(Object.fromEntries(entriesData.map((entry) => [entry.entryId, toEntryEdit(entry)])));
-      setEntryActionEdits(Object.fromEntries(entriesData.map((entry) => [entry.entryId, emptyActionEdit])));
+      setEntryActionEdits(Object.fromEntries(entriesData.map((entry) => [entry.entryId, toEntryActionEdit(entry)])));
       setEntryErrors({});
       setExpiringEntries(expiringData);
       setSuggestions(suggestionData);
@@ -124,8 +149,18 @@ export function App() {
     await loadData();
   };
 
-  const onMarkPurchased = async (item: ShoppingListItem) => {
-    await updateShoppingListItemStatus(baseUrl, item.id, { isResolved: true, isPurchased: true });
+  const onMoveToCart = async (item: ShoppingListItem) => {
+    await updateShoppingListItemStatus(baseUrl, item.id, { status: 'InCart' });
+    await loadData();
+  };
+
+  const onMarkBought = async (item: ShoppingListItem) => {
+    await updateShoppingListItemStatus(baseUrl, item.id, { status: 'Bought' });
+    await loadData();
+  };
+
+  const onDeleteShoppingItem = async (item: ShoppingListItem) => {
+    await deleteShoppingListItem(baseUrl, item.id);
     await loadData();
   };
 
@@ -208,7 +243,7 @@ export function App() {
     setEntryActionEdits((current) => ({
       ...current,
       [entryId]: {
-        ...(current[entryId] ?? emptyActionEdit),
+        ...(current[entryId] ?? { addStock: '', addStockUnit: '', consumeStock: '', consumeStockUnit: '' }),
         ...patch
       }
     }));
@@ -261,7 +296,12 @@ export function App() {
   };
 
   const onAddStock = async (entry: ConsumableEntry) => {
-    const amount = parseQuantity(entryActionEdits[entry.entryId]?.addStock ?? '');
+    const actionEdit = entryActionEdits[entry.entryId] ?? toEntryActionEdit(entry);
+    const amount = parseQuantity(actionEdit.addStock);
+    if (!actionEdit.addStockUnit.trim() || actionEdit.addStockUnit.trim().toLowerCase() !== entry.unit.toLowerCase()) {
+      setEntryError(entry.entryId, `Add stock unit must match the lot unit ${entry.unit}.`);
+      return;
+    }
     if (amount === null || amount <= 0) {
       setEntryError(entry.entryId, 'Add stock amount must be greater than zero.');
       return;
@@ -272,7 +312,12 @@ export function App() {
   };
 
   const onConsumeStock = async (entry: ConsumableEntry) => {
-    const amount = parseQuantity(entryActionEdits[entry.entryId]?.consumeStock ?? '');
+    const actionEdit = entryActionEdits[entry.entryId] ?? toEntryActionEdit(entry);
+    const amount = parseQuantity(actionEdit.consumeStock);
+    if (!actionEdit.consumeStockUnit.trim() || actionEdit.consumeStockUnit.trim().toLowerCase() !== entry.unit.toLowerCase()) {
+      setEntryError(entry.entryId, `Consume stock unit must match the lot unit ${entry.unit}.`);
+      return;
+    }
     if (amount === null || amount <= 0) {
       setEntryError(entry.entryId, 'Consume amount must be greater than zero.');
       return;
@@ -295,7 +340,7 @@ export function App() {
 
   const onResetEntryEdit = (entry: ConsumableEntry) => {
     setEntryEdit(entry.entryId, toEntryEdit(entry));
-    setEntryActionEdit(entry.entryId, emptyActionEdit);
+    setEntryActionEdit(entry.entryId, toEntryActionEdit(entry));
     clearEntryError(entry.entryId);
   };
 
@@ -366,7 +411,7 @@ export function App() {
         <ul>
           {consumableEntries.map((entry) => {
             const edit = entryEdits[entry.entryId] ?? toEntryEdit(entry);
-            const actionEdit = entryActionEdits[entry.entryId] ?? emptyActionEdit;
+            const actionEdit = entryActionEdits[entry.entryId] ?? toEntryActionEdit(entry);
             const expiryStyle = getExpiryStyle(entry.expiryStatus);
             const lotLocation = entry.storageSlotId || 'No location set';
             return (
@@ -396,6 +441,14 @@ export function App() {
                       onChange={(e) => setEntryActionEdit(entry.entryId, { addStock: e.target.value })}
                     />
                   </label>
+                  <label>
+                    Add stock unit
+                    <input
+                      aria-label={`Add stock unit for ${entry.itemName} lot ${entry.entryId}`}
+                      value={actionEdit.addStockUnit}
+                      onChange={(e) => setEntryActionEdit(entry.entryId, { addStockUnit: e.target.value })}
+                    />
+                  </label>
                   <button onClick={() => onAddStock(entry)}>Add Stock</button>
                   <label>
                     Consume stock
@@ -406,6 +459,14 @@ export function App() {
                       min={0}
                       value={actionEdit.consumeStock}
                       onChange={(e) => setEntryActionEdit(entry.entryId, { consumeStock: e.target.value })}
+                    />
+                  </label>
+                  <label>
+                    Consume stock unit
+                    <input
+                      aria-label={`Consume stock unit for ${entry.itemName} lot ${entry.entryId}`}
+                      value={actionEdit.consumeStockUnit}
+                      onChange={(e) => setEntryActionEdit(entry.entryId, { consumeStockUnit: e.target.value })}
                     />
                   </label>
                   <button onClick={() => onConsumeStock(entry)}>Consume Stock</button>
@@ -464,6 +525,7 @@ export function App() {
         <ul>
           {suggestions.map((suggestion) => {
             const breakdown = `Breakdown: current ${suggestion.usableCurrentQuantity} ${suggestion.unit}; required ${suggestion.requiredAmount} ${suggestion.unit}; suggested ${suggestion.suggestedPurchaseAmount} ${suggestion.unit}; rule source replenishment target; desired ${suggestion.desiredQuantity} ${suggestion.unit}; usable ${suggestion.usableCurrentQuantity} ${suggestion.unit}; deficit ${suggestion.deficitAmount} ${suggestion.unit}; expiring soon ${suggestion.expiringSoonAmount} ${suggestion.unit}`;
+            const activeShoppingItem = shoppingListItems.find((item) => item.itemDefinitionId === suggestion.itemDefinitionId && !item.isPurchased);
             return (
               <li key={suggestion.itemDefinitionId}>
                 {suggestion.itemName}: {suggestion.suggestedPurchaseAmount} {suggestion.unit}
@@ -476,9 +538,13 @@ export function App() {
                 >
                   Breakdown
                 </span>
-                <button style={{ marginLeft: 8 }} onClick={() => onCreateFromSuggestion(suggestion)}>
-                  Add to Shopping List
-                </button>
+                {activeShoppingItem ? (
+                  <span style={{ marginLeft: 8 }}>[{getShoppingStatusLabel(activeShoppingItem)}]</span>
+                ) : (
+                  <button style={{ marginLeft: 8 }} onClick={() => onCreateFromSuggestion(suggestion)}>
+                    Add to Shopping List
+                  </button>
+                )}
               </li>
             );
           })}
@@ -548,16 +614,33 @@ export function App() {
       {!isLoading && !error && shoppingListItems.length === 0 && <p>No shopping items.</p>}
       {!isLoading && !error && shoppingListItems.length > 0 && (
         <ul>
-          {shoppingListItems.map((item) => (
-            <li key={item.id}>
-              {item.itemName}: {item.quantity} {item.unit} [{item.isPurchased ? 'Purchased' : item.isResolved ? 'Resolved' : 'Open'}]
-              {!item.isPurchased && (
-                <button style={{ marginLeft: 8 }} onClick={() => onMarkPurchased(item)}>
-                  Mark Purchased
-                </button>
-              )}
-            </li>
-          ))}
+          {shoppingListItems.map((item) => {
+            const status = getShoppingStatus(item);
+            const stockAction = item.nextInventoryAction ?? (item.stockUpdateNeeded ? 'Add stock details for quantity, lot, expiry, and location.' : null);
+            return (
+              <li key={item.id}>
+                {item.itemName}: {item.quantity} {item.unit} [{getShoppingStatusLabel(item)}]
+                {status === 'ShoppingList' && (
+                  <button style={{ marginLeft: 8 }} onClick={() => onMoveToCart(item)}>
+                    Add to Cart
+                  </button>
+                )}
+                {status === 'InCart' && (
+                  <button style={{ marginLeft: 8 }} onClick={() => onMarkBought(item)}>
+                    Mark Bought
+                  </button>
+                )}
+                {(status === 'Bought' || status === 'StockUpdateNeeded') && (
+                  <button style={{ marginLeft: 8 }} onClick={() => onDeleteShoppingItem(item)}>
+                    Remove Bought Item
+                  </button>
+                )}
+                {(item.stockUpdateNeeded || status === 'StockUpdateNeeded') && stockAction && (
+                  <div>Stock update needed: {stockAction}</div>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
     </main>
