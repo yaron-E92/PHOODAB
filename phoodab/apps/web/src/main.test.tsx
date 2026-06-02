@@ -6,12 +6,14 @@ import { createRoot } from 'react-dom/client';
 const getHealthMock = vi.fn().mockResolvedValue({ status: 'ok' });
 const getVersionMock = vi.fn().mockResolvedValue({ version: 'test' });
 const getInventorySummaryMock = vi.fn();
+const getConsumableEntriesMock = vi.fn();
 const getExpiringConsumableEntriesMock = vi.fn();
 const getReplenishmentSuggestionsMock = vi.fn();
 const getReplenishmentRulesMock = vi.fn();
 const getShoppingListItemsMock = vi.fn();
 const createConsumableItemMock = vi.fn().mockResolvedValue({ id: 'item-1', name: 'Milk', kind: 'Consumable' });
 const addConsumableEntryMock = vi.fn();
+const updateConsumableEntryMock = vi.fn();
 const createShoppingListItemFromSuggestionMock = vi.fn();
 const updateShoppingListItemStatusMock = vi.fn();
 const updateReplenishmentRuleMock = vi.fn();
@@ -20,12 +22,14 @@ vi.mock('../../../packages/api-client/src/client', () => ({
   getHealth: getHealthMock,
   getVersion: getVersionMock,
   getInventorySummary: getInventorySummaryMock,
+  getConsumableEntries: getConsumableEntriesMock,
   getExpiringConsumableEntries: getExpiringConsumableEntriesMock,
   getReplenishmentSuggestions: getReplenishmentSuggestionsMock,
   getReplenishmentRules: getReplenishmentRulesMock,
   getShoppingListItems: getShoppingListItemsMock,
   createConsumableItem: createConsumableItemMock,
   addConsumableEntry: addConsumableEntryMock,
+  updateConsumableEntry: updateConsumableEntryMock,
   createShoppingListItemFromSuggestion: createShoppingListItemFromSuggestionMock,
   updateShoppingListItemStatus: updateShoppingListItemStatusMock,
   updateReplenishmentRule: updateReplenishmentRuleMock
@@ -44,6 +48,7 @@ describe('pantry mvp page', () => {
     vi.clearAllMocks();
     document.body.innerHTML = '<div id="root"></div>';
     getInventorySummaryMock.mockResolvedValue([]);
+    getConsumableEntriesMock.mockResolvedValue([]);
     getExpiringConsumableEntriesMock.mockResolvedValue([]);
     getReplenishmentSuggestionsMock.mockResolvedValue([]);
     getReplenishmentRulesMock.mockResolvedValue([]);
@@ -66,19 +71,35 @@ describe('pantry mvp page', () => {
     expect(container.textContent).toContain('No replenishment needed.');
   });
 
-  it('renders backend-provided expiryStatus and requiredAmount values', async () => {
+  it('renders backend-provided expiryStatus and replenishment breakdown values', async () => {
     getInventorySummaryMock.mockResolvedValue([
       {
         itemDefinitionId: 'item-1',
         itemName: 'Milk',
         totalQuantity: 1,
         unit: 'liter',
-        entryCount: 1
+        entryCount: 1,
+        hasMixedUnits: false,
+        mixedUnitWarning: null
+      }
+    ]);
+    getConsumableEntriesMock.mockResolvedValue([
+      {
+        entryId: 'entry-1',
+        itemDefinitionId: 'item-1',
+        itemName: 'Milk',
+        quantity: 1,
+        unit: 'liter',
+        expiresOn: '2026-06-01',
+        expiresInDays: -1,
+        expiryStatus: 'Expired',
+        storageSlotId: 'slot-1'
       }
     ]);
     getExpiringConsumableEntriesMock.mockResolvedValue([
       {
         entryId: 'entry-1',
+        itemName: 'Milk',
         quantity: 1,
         unit: 'liter',
         expiresOn: '2026-06-01',
@@ -90,9 +111,13 @@ describe('pantry mvp page', () => {
       {
         itemDefinitionId: 'item-1',
         itemName: 'Milk',
-        requiredAmount: 4,
+        requiredAmount: 5,
         desiredQuantity: 10,
-        currentQuantity: 6,
+        currentQuantity: 7,
+        usableCurrentQuantity: 7,
+        deficitAmount: 3,
+        expiringSoonAmount: 2,
+        suggestedPurchaseAmount: 5,
         unit: 'liter',
         entries: []
       }
@@ -109,8 +134,211 @@ describe('pantry mvp page', () => {
       await Promise.resolve();
     });
 
-    expect(container.textContent).toContain('1 liter - Soon');
-    expect(container.textContent).toContain('Milk: 4 liter');
+    expect(container.textContent).toContain('Milk - 1 liter - Soon');
+    expect(container.textContent).toContain('Milk: 5 liter (2 about to expire)');
+    expect(container.textContent).not.toContain('(+2 about to expire)');
+    const breakdown = 'Breakdown: desired 10 liter; usable 7 liter; deficit 3 liter; expiring soon 2 liter';
+    const breakdownTrigger = container.querySelector(`[aria-label="${breakdown}"]`);
+    expect(breakdownTrigger?.textContent).toContain('Breakdown');
+    expect(breakdownTrigger?.getAttribute('title')).toBe(breakdown);
+    expect(container.textContent).toContain('Milk');
+    expect(container.textContent).toContain('Expired');
+    expect(container.textContent).toContain('slot-1');
+  });
+
+  it('uses backend suggested purchase amount and source context when adding a suggestion to shopping list', async () => {
+    getReplenishmentSuggestionsMock.mockResolvedValue([
+      {
+        itemDefinitionId: 'item-1',
+        itemName: 'Milk',
+        requiredAmount: 5,
+        desiredQuantity: 10,
+        currentQuantity: 7,
+        usableCurrentQuantity: 7,
+        deficitAmount: 3,
+        expiringSoonAmount: 2,
+        suggestedPurchaseAmount: 5,
+        unit: 'liter',
+        entries: []
+      }
+    ]);
+
+    const { App } = await import('./main');
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<App />);
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Add to Shopping List')!.click();
+      await Promise.resolve();
+    });
+
+    expect(createShoppingListItemFromSuggestionMock).toHaveBeenCalledWith('http://localhost:5199', {
+      itemDefinitionId: 'item-1',
+      quantity: 5,
+      unit: 'liter',
+      deficitAmount: 3,
+      expiringSoonAmount: 2,
+      suggestedPurchaseAmount: 5
+    });
+  });
+
+  it('labels replenishment rule fields and saves clarified values', async () => {
+    getInventorySummaryMock.mockResolvedValue([
+      {
+        itemDefinitionId: 'item-1',
+        itemName: 'Milk',
+        totalQuantity: 1,
+        unit: 'liter',
+        entryCount: 1,
+        hasMixedUnits: false,
+        mixedUnitWarning: null
+      }
+    ]);
+    getReplenishmentRulesMock.mockResolvedValue([
+      {
+        id: 'rule-1',
+        itemDefinitionId: 'item-1',
+        desiredAmount: 2,
+        desiredUnit: 'liter',
+        expiryWarningDays: 3,
+        isDisabled: false
+      }
+    ]);
+
+    const { App } = await import('./main');
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<App />);
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain('Target amount');
+    expect(container.textContent).toContain('Expiry warning days');
+    expect(container.textContent).not.toContain('Amount to keep stocked before replenishment is suggested.');
+    expect(container.textContent).not.toContain('Treat entries expiring within this many days as warning items.');
+
+    const targetAmountInput = container.querySelector('input[aria-label="Target amount for Milk"]') as HTMLInputElement;
+    const targetUnitInput = container.querySelector('input[aria-label="Target unit for Milk"]') as HTMLInputElement;
+    const expiryWarningInput = container.querySelector('input[aria-label="Expiry warning days for Milk"]') as HTMLInputElement;
+    const disabledInput = container.querySelector('input[aria-label="Disable replenishment rule for Milk"]') as HTMLInputElement;
+
+    expect(targetAmountInput.title).toBe('Amount to keep stocked before replenishment is suggested.');
+    expect(targetAmountInput.getAttribute('aria-description')).toBe('Amount to keep stocked before replenishment is suggested.');
+    expect(expiryWarningInput.title).toBe('Treat entries expiring within this many days as warning items.');
+    expect(expiryWarningInput.getAttribute('aria-description')).toBe('Treat entries expiring within this many days as warning items.');
+
+    await act(async () => {
+      targetAmountInput.value = '4';
+      targetAmountInput.dispatchEvent(new Event('input', { bubbles: true }));
+      targetUnitInput.value = 'carton';
+      targetUnitInput.dispatchEvent(new Event('input', { bubbles: true }));
+      expiryWarningInput.value = '5';
+      expiryWarningInput.dispatchEvent(new Event('input', { bubbles: true }));
+      disabledInput.checked = true;
+      disabledInput.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    await act(async () => {
+      Array.from(container.querySelectorAll('button')).find((button) => button.getAttribute('aria-label') === 'Save replenishment rule for Milk')!.click();
+      await Promise.resolve();
+    });
+
+    expect(updateReplenishmentRuleMock).toHaveBeenCalledWith('http://localhost:5199', 'rule-1', {
+      desiredAmount: 4,
+      desiredUnit: 'carton',
+      expiryWarningDays: 5,
+      isDisabled: true
+    });
+  });
+
+  it('updates consumable entries and refreshes pantry data', async () => {
+    getConsumableEntriesMock.mockResolvedValue([
+      {
+        entryId: 'entry-1',
+        itemDefinitionId: 'item-1',
+        itemName: 'Milk',
+        quantity: 1,
+        unit: 'liter',
+        expiresOn: null,
+        expiresInDays: null,
+        expiryStatus: 'Unknown',
+        storageSlotId: null
+      }
+    ]);
+
+    const { App } = await import('./main');
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<App />);
+      await Promise.resolve();
+    });
+
+    const inputs = Array.from(container.querySelectorAll('input'));
+    const quantityInput = inputs.find((input) => input.getAttribute('aria-label') === 'Entry quantity for Milk')!;
+    const unitInput = inputs.find((input) => input.getAttribute('aria-label') === 'Entry unit for Milk')!;
+
+    await act(async () => {
+      quantityInput.value = '2';
+      quantityInput.dispatchEvent(new Event('input', { bubbles: true }));
+      unitInput.value = 'carton';
+      unitInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    await act(async () => {
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Save Entry')!.click();
+      await Promise.resolve();
+    });
+
+    expect(updateConsumableEntryMock).toHaveBeenCalledWith('http://localhost:5199', 'entry-1', {
+      quantity: 2,
+      unit: 'carton',
+      expiresOn: null,
+      storageSlotId: null
+    });
+    expect(getInventorySummaryMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows mixed-unit inventory summaries as warnings', async () => {
+    getInventorySummaryMock.mockResolvedValue([
+      {
+        itemDefinitionId: 'item-1',
+        itemName: 'Rice',
+        totalQuantity: null,
+        unit: null,
+        entryCount: 2,
+        hasMixedUnits: true,
+        mixedUnitWarning: 'Mixed units cannot be totaled safely.'
+      }
+    ]);
+
+    const { App } = await import('./main');
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<App />);
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain('Rice: mixed units (2 entries)');
+    expect(container.textContent).toContain('Mixed units cannot be totaled safely.');
   });
 
   it('shows basic error state', async () => {

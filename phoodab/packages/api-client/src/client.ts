@@ -5,6 +5,7 @@ type VersionResponse = paths['/version']['get']['responses']['200']['content']['
 type ReplenishmentRulesResponse = paths['/api/replenishment/rules']['get']['responses']['200']['content']['application/json'];
 type UpdateReplenishmentRuleRequest = paths['/api/replenishment/rules/{ruleId}']['patch']['requestBody']['content']['application/json'];
 type CreateConsumableEntryRequest = paths['/api/consumable-entries']['post']['requestBody']['content']['application/json'];
+type UpdateConsumableEntryRequest = paths['/api/consumable-entries/{entryId}']['patch']['requestBody']['content']['application/json'];
 
 export type ItemDefinition = {
   id: string;
@@ -15,25 +16,36 @@ export type ItemDefinition = {
 export type InventorySummaryItem = {
   itemDefinitionId: string;
   itemName: string;
-  totalQuantity: number;
+  totalQuantity: number | null;
   unit: string | null;
   entryCount: number;
+  hasMixedUnits: boolean;
+  mixedUnitWarning: string | null;
 };
 
-export type ExpiringConsumableEntry = {
+export type ConsumableEntry = {
   entryId: string;
+  itemDefinitionId: string;
+  itemName: string;
   quantity: number;
   unit: string;
   expiresOn: string | null;
   expiresInDays: number | null;
   expiryStatus: 'Unknown' | 'Expired' | 'Urgent' | 'Soon' | 'Safe';
+  storageSlotId: string | null;
 };
+
+export type ExpiringConsumableEntry = ConsumableEntry;
 
 export type ReplenishmentSuggestion = {
   itemDefinitionId: string;
   itemName: string;
   currentQuantity: number;
+  usableCurrentQuantity: number;
   desiredQuantity: number;
+  deficitAmount: number;
+  expiringSoonAmount: number;
+  suggestedPurchaseAmount: number;
   requiredAmount: number;
   unit: string;
   entries: {
@@ -56,6 +68,9 @@ export type ShoppingListItem = {
   unit: string;
   isResolved: boolean;
   isPurchased: boolean;
+  sourceDeficitAmount: number | null;
+  sourceExpiringSoonAmount: number | null;
+  sourceSuggestedPurchaseAmount: number | null;
 };
 
 export async function getHealth(baseUrl: string): Promise<HealthResponse> {
@@ -113,6 +128,26 @@ export async function getInventorySummary(baseUrl: string): Promise<InventorySum
   return response.json();
 }
 
+export async function getConsumableEntries(baseUrl: string): Promise<ConsumableEntry[]> {
+  const response = await fetch(`${baseUrl}/api/consumable-entries`);
+  if (!response.ok) throw new Error(`Consumable entries failed: ${response.status}`);
+  return response.json();
+}
+
+export async function updateConsumableEntry(
+  baseUrl: string,
+  entryId: string,
+  payload: UpdateConsumableEntryRequest
+): Promise<ConsumableEntry> {
+  const response = await fetch(`${baseUrl}/api/consumable-entries/${entryId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) throw new Error(`Update consumable entry failed: ${response.status}`);
+  return response.json();
+}
+
 export async function getExpiringConsumableEntries(baseUrl: string): Promise<ExpiringConsumableEntry[]> {
   const response = await fetch(`${baseUrl}/api/consumable-entries/expiring`);
   if (!response.ok) throw new Error(`Expiring consumable entries failed: ${response.status}`);
@@ -145,7 +180,7 @@ export async function updateReplenishmentRule(
   return response.json();
 }
 
-export async function createShoppingListItemFromSuggestion(baseUrl: string, payload: { itemDefinitionId: string; quantity: number; unit: string }): Promise<ShoppingListItem> {
+export async function createShoppingListItemFromSuggestion(baseUrl: string, payload: { itemDefinitionId: string; quantity: number; unit: string; deficitAmount?: number | null; expiringSoonAmount?: number | null; suggestedPurchaseAmount?: number | null }): Promise<ShoppingListItem> {
   const response = await fetch(`${baseUrl}/api/shopping-list-items/from-suggestion`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
