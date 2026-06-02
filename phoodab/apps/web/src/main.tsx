@@ -356,6 +356,8 @@ export function App() {
                     Target amount
                     <input
                       aria-label={`Target amount for ${itemName}`}
+                      aria-description="Amount to keep stocked before replenishment is suggested."
+                      title="Amount to keep stocked before replenishment is suggested."
                       type="number"
                       step="any"
                       value={rule.desiredAmount}
@@ -374,6 +376,8 @@ export function App() {
                     Expiry warning days
                     <input
                       aria-label={`Expiry warning days for ${itemName}`}
+                      aria-description="Treat entries expiring within this many days as warning items."
+                      title="Treat entries expiring within this many days as warning items."
                       type="number"
                       min={0}
                       value={rule.expiryWarningDays}
@@ -391,7 +395,6 @@ export function App() {
                   </label>
                   <button aria-label={`Save replenishment rule for ${itemName}`} onClick={() => onSaveRule(rule)}>Save</button>
                 </div>
-                <small>Amount to keep stocked before replenishment is suggested. Treat entries expiring within this many days as warning items.</small>
               </li>
             );
           })}

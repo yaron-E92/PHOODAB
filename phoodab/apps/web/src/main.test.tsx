@@ -224,14 +224,19 @@ describe('pantry mvp page', () => {
     });
 
     expect(container.textContent).toContain('Target amount');
-    expect(container.textContent).toContain('Amount to keep stocked before replenishment is suggested.');
     expect(container.textContent).toContain('Expiry warning days');
-    expect(container.textContent).toContain('Treat entries expiring within this many days as warning items.');
+    expect(container.textContent).not.toContain('Amount to keep stocked before replenishment is suggested.');
+    expect(container.textContent).not.toContain('Treat entries expiring within this many days as warning items.');
 
     const targetAmountInput = container.querySelector('input[aria-label="Target amount for Milk"]') as HTMLInputElement;
     const targetUnitInput = container.querySelector('input[aria-label="Target unit for Milk"]') as HTMLInputElement;
     const expiryWarningInput = container.querySelector('input[aria-label="Expiry warning days for Milk"]') as HTMLInputElement;
     const disabledInput = container.querySelector('input[aria-label="Disable replenishment rule for Milk"]') as HTMLInputElement;
+
+    expect(targetAmountInput.title).toBe('Amount to keep stocked before replenishment is suggested.');
+    expect(targetAmountInput.getAttribute('aria-description')).toBe('Amount to keep stocked before replenishment is suggested.');
+    expect(expiryWarningInput.title).toBe('Treat entries expiring within this many days as warning items.');
+    expect(expiryWarningInput.getAttribute('aria-description')).toBe('Treat entries expiring within this many days as warning items.');
 
     await act(async () => {
       targetAmountInput.value = '4';
