@@ -136,12 +136,14 @@ describe('pantry mvp page', () => {
 
     expect(container.textContent).toContain('Milk - 1 liter - Soon');
     expect(container.textContent).toContain('Milk: 5 liter (2 about to expire)');
+    expect(container.textContent).not.toContain('Current: 7 liter; Required: 5 liter; Suggested: 5 liter; Rule source: replenishment target');
     expect(container.textContent).not.toContain('(+2 about to expire)');
-    const breakdown = 'Breakdown: desired 10 liter; usable 7 liter; deficit 3 liter; expiring soon 2 liter';
+    const breakdown = 'Breakdown: current 7 liter; required 5 liter; suggested 5 liter; rule source replenishment target; desired 10 liter; usable 7 liter; deficit 3 liter; expiring soon 2 liter';
     const breakdownTrigger = container.querySelector(`[aria-label="${breakdown}"]`);
     expect(breakdownTrigger?.textContent).toContain('Breakdown');
     expect(breakdownTrigger?.getAttribute('title')).toBe(breakdown);
     expect(container.textContent).toContain('Milk');
+    expect(container.textContent).toContain('Lot entry-1');
     expect(container.textContent).toContain('Expired');
     expect(container.textContent).toContain('slot-1');
   });
@@ -300,7 +302,7 @@ describe('pantry mvp page', () => {
     });
 
     await act(async () => {
-      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Save Entry')!.click();
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Adjust Quantity / Expiry / Location')!.click();
       await Promise.resolve();
     });
 
@@ -311,6 +313,146 @@ describe('pantry mvp page', () => {
       storageSlotId: null
     });
     expect(getInventorySummaryMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('offers lot actions for adding, consuming, depleting, editing expiry, and moving location', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    getConsumableEntriesMock.mockResolvedValue([
+      {
+        entryId: 'entry-1',
+        itemDefinitionId: 'item-1',
+        itemName: 'Milk',
+        quantity: 5,
+        unit: 'liter',
+        expiresOn: '2026-06-10',
+        expiresInDays: 8,
+        expiryStatus: 'Safe',
+        storageSlotId: 'slot-1'
+      }
+    ]);
+
+    const { App } = await import('./main');
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<App />);
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain('Lot entry-1');
+    expect(container.textContent).toContain('Expiry: 2026-06-10 (Safe)');
+    expect(container.textContent).toContain('Location: slot-1');
+    expect(container.textContent).toContain('Add stock');
+    expect(container.textContent).toContain('Consume stock');
+    expect(container.textContent).toContain('Mark Lot Depleted');
+    expect(container.textContent).toContain('Undo Unsaved Changes');
+
+    const addStockInput = container.querySelector('input[aria-label="Add stock amount for Milk lot entry-1"]') as HTMLInputElement;
+    await act(async () => {
+      addStockInput.value = '2';
+      addStockInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    await act(async () => {
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Add Stock')!.click();
+      await Promise.resolve();
+    });
+
+    expect(updateConsumableEntryMock).toHaveBeenLastCalledWith('http://localhost:5199', 'entry-1', {
+      quantity: 7,
+      unit: 'liter',
+      expiresOn: '2026-06-10',
+      storageSlotId: 'slot-1'
+    });
+
+    const consumeStockInput = container.querySelector('input[aria-label="Consume stock amount for Milk lot entry-1"]') as HTMLInputElement;
+    await act(async () => {
+      consumeStockInput.value = '3';
+      consumeStockInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    await act(async () => {
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Consume Stock')!.click();
+      await Promise.resolve();
+    });
+
+    expect(updateConsumableEntryMock).toHaveBeenLastCalledWith('http://localhost:5199', 'entry-1', {
+      quantity: 2,
+      unit: 'liter',
+      expiresOn: '2026-06-10',
+      storageSlotId: 'slot-1'
+    });
+
+    await act(async () => {
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Mark Lot Depleted')!.click();
+      await Promise.resolve();
+    });
+
+    expect(window.confirm).toHaveBeenCalledWith('Mark Milk lot entry-1 as depleted?');
+    expect(updateConsumableEntryMock).toHaveBeenLastCalledWith('http://localhost:5199', 'entry-1', {
+      quantity: 0,
+      unit: 'liter',
+      expiresOn: '2026-06-10',
+      storageSlotId: 'slot-1'
+    });
+  });
+
+  it('rejects invalid consumable quantity operations before sending updates', async () => {
+    getConsumableEntriesMock.mockResolvedValue([
+      {
+        entryId: 'entry-1',
+        itemDefinitionId: 'item-1',
+        itemName: 'Milk',
+        quantity: 1,
+        unit: 'liter',
+        expiresOn: null,
+        expiresInDays: null,
+        expiryStatus: 'Unknown',
+        storageSlotId: null
+      }
+    ]);
+
+    const { App } = await import('./main');
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<App />);
+      await Promise.resolve();
+    });
+
+    const quantityInput = container.querySelector('input[aria-label="Entry quantity for Milk"]') as HTMLInputElement;
+    await act(async () => {
+      quantityInput.value = '-1';
+      quantityInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    await act(async () => {
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Adjust Quantity / Expiry / Location')!.click();
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain('Quantity must be zero or greater.');
+    expect(updateConsumableEntryMock).not.toHaveBeenCalled();
+
+    const consumeStockInput = container.querySelector('input[aria-label="Consume stock amount for Milk lot entry-1"]') as HTMLInputElement;
+    await act(async () => {
+      consumeStockInput.value = '2';
+      consumeStockInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    await act(async () => {
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Consume Stock')!.click();
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain('Consume amount cannot exceed the lot quantity.');
+    expect(updateConsumableEntryMock).not.toHaveBeenCalled();
   });
 
   it('shows mixed-unit inventory summaries as warnings', async () => {
