@@ -26,6 +26,36 @@ import {
 
 const baseUrl = 'http://localhost:5199';
 
+type EntryEdit = { quantity: string; unit: string; expiresOn: string; storageSlotId: string };
+type EntryActionEdit = { addStock: string; consumeStock: string };
+
+const toEntryEdit = (entry: ConsumableEntry): EntryEdit => ({
+  quantity: String(entry.quantity),
+  unit: entry.unit,
+  expiresOn: entry.expiresOn ?? '',
+  storageSlotId: entry.storageSlotId ?? ''
+});
+
+const emptyActionEdit: EntryActionEdit = { addStock: '', consumeStock: '' };
+
+const parseQuantity = (value: string) => {
+  const quantity = Number(value);
+  return Number.isFinite(quantity) ? quantity : null;
+};
+
+const getExpiryStyle = (expiryStatus: ConsumableEntry['expiryStatus']): React.CSSProperties => {
+  if (expiryStatus === 'Expired') {
+    return { background: '#fee2e2', borderLeft: '4px solid #dc2626' };
+  }
+  if (expiryStatus === 'Urgent') {
+    return { background: '#ffedd5', borderLeft: '4px solid #ea580c' };
+  }
+  if (expiryStatus === 'Soon') {
+    return { background: '#fef9c3', borderLeft: '4px solid #ca8a04' };
+  }
+  return { borderLeft: '4px solid #16a34a' };
+};
+
 export function App() {
   const [health, setHealth] = useState<string>('loading');
   const [version, setVersion] = useState<string>('loading');
@@ -41,7 +71,9 @@ export function App() {
 
   const [summary, setSummary] = useState<InventorySummaryItem[]>([]);
   const [consumableEntries, setConsumableEntries] = useState<ConsumableEntry[]>([]);
-  const [entryEdits, setEntryEdits] = useState<Record<string, { quantity: string; unit: string; expiresOn: string; storageSlotId: string }>>({});
+  const [entryEdits, setEntryEdits] = useState<Record<string, EntryEdit>>({});
+  const [entryActionEdits, setEntryActionEdits] = useState<Record<string, EntryActionEdit>>({});
+  const [entryErrors, setEntryErrors] = useState<Record<string, string>>({});
   const [expiringEntries, setExpiringEntries] = useState<ExpiringConsumableEntry[]>([]);
   const [suggestions, setSuggestions] = useState<ReplenishmentSuggestion[]>([]);
   const [createdItems, setCreatedItems] = useState<ItemDefinition[]>([]);
@@ -66,15 +98,9 @@ export function App() {
       ]);
       setSummary(summaryData);
       setConsumableEntries(entriesData);
-      setEntryEdits(Object.fromEntries(entriesData.map((entry) => [
-        entry.entryId,
-        {
-          quantity: String(entry.quantity),
-          unit: entry.unit,
-          expiresOn: entry.expiresOn ?? '',
-          storageSlotId: entry.storageSlotId ?? ''
-        }
-      ])));
+      setEntryEdits(Object.fromEntries(entriesData.map((entry) => [entry.entryId, toEntryEdit(entry)])));
+      setEntryActionEdits(Object.fromEntries(entriesData.map((entry) => [entry.entryId, emptyActionEdit])));
+      setEntryErrors({});
       setExpiringEntries(expiringData);
       setSuggestions(suggestionData);
       setShoppingListItems(shoppingData);
@@ -135,9 +161,15 @@ export function App() {
     if (!entryItemDefinitionId || !quantity || !unit.trim()) return;
 
     try {
+      const parsedQuantity = parseQuantity(quantity);
+      if (parsedQuantity === null || parsedQuantity < 0) {
+        setError('Quantity must be zero or greater.');
+        return;
+      }
+
       await addConsumableEntry(baseUrl, {
         itemDefinitionId: entryItemDefinitionId,
-        quantity: Number(quantity),
+        quantity: parsedQuantity,
         unit: unit.trim(),
         expiresOn: expiryDate || null,
         storageSlotId: storageSlotId || null
@@ -162,7 +194,7 @@ export function App() {
     await loadData();
   };
 
-  const setEntryEdit = (entryId: string, patch: Partial<{ quantity: string; unit: string; expiresOn: string; storageSlotId: string }>) => {
+  const setEntryEdit = (entryId: string, patch: Partial<EntryEdit>) => {
     setEntryEdits((current) => ({
       ...current,
       [entryId]: {
@@ -172,17 +204,99 @@ export function App() {
     }));
   };
 
+  const setEntryActionEdit = (entryId: string, patch: Partial<EntryActionEdit>) => {
+    setEntryActionEdits((current) => ({
+      ...current,
+      [entryId]: {
+        ...(current[entryId] ?? emptyActionEdit),
+        ...patch
+      }
+    }));
+  };
+
+  const clearEntryError = (entryId: string) => {
+    setEntryErrors((current) => {
+      const rest = { ...current };
+      delete rest[entryId];
+      return rest;
+    });
+  };
+
+  const setEntryError = (entryId: string, message: string) => {
+    setEntryErrors((current) => ({ ...current, [entryId]: message }));
+  };
+
+  const updateEntryQuantity = async (entry: ConsumableEntry, nextQuantity: number) => {
+    await updateConsumableEntry(baseUrl, entry.entryId, {
+      quantity: nextQuantity,
+      unit: entry.unit,
+      expiresOn: entry.expiresOn,
+      storageSlotId: entry.storageSlotId
+    });
+    await loadData();
+  };
+
   const onSaveConsumableEntry = async (entry: ConsumableEntry) => {
     const edit = entryEdits[entry.entryId];
-    if (!edit || !edit.quantity || !edit.unit.trim()) return;
+    if (!edit || !edit.quantity || !edit.unit.trim()) {
+      setEntryError(entry.entryId, 'Quantity and unit are required.');
+      return;
+    }
+
+    const parsedQuantity = parseQuantity(edit.quantity);
+    if (parsedQuantity === null || parsedQuantity < 0) {
+      setEntryError(entry.entryId, 'Quantity must be zero or greater.');
+      return;
+    }
+
+    clearEntryError(entry.entryId);
 
     await updateConsumableEntry(baseUrl, entry.entryId, {
-      quantity: Number(edit.quantity),
+      quantity: parsedQuantity,
       unit: edit.unit.trim(),
       expiresOn: edit.expiresOn || null,
       storageSlotId: edit.storageSlotId || null
     });
     await loadData();
+  };
+
+  const onAddStock = async (entry: ConsumableEntry) => {
+    const amount = parseQuantity(entryActionEdits[entry.entryId]?.addStock ?? '');
+    if (amount === null || amount <= 0) {
+      setEntryError(entry.entryId, 'Add stock amount must be greater than zero.');
+      return;
+    }
+
+    clearEntryError(entry.entryId);
+    await updateEntryQuantity(entry, entry.quantity + amount);
+  };
+
+  const onConsumeStock = async (entry: ConsumableEntry) => {
+    const amount = parseQuantity(entryActionEdits[entry.entryId]?.consumeStock ?? '');
+    if (amount === null || amount <= 0) {
+      setEntryError(entry.entryId, 'Consume amount must be greater than zero.');
+      return;
+    }
+    if (amount > entry.quantity) {
+      setEntryError(entry.entryId, 'Consume amount cannot exceed the lot quantity.');
+      return;
+    }
+
+    clearEntryError(entry.entryId);
+    await updateEntryQuantity(entry, entry.quantity - amount);
+  };
+
+  const onMarkLotDepleted = async (entry: ConsumableEntry) => {
+    if (!window.confirm(`Mark ${entry.itemName} lot ${entry.entryId} as depleted?`)) return;
+
+    clearEntryError(entry.entryId);
+    await updateEntryQuantity(entry, 0);
+  };
+
+  const onResetEntryEdit = (entry: ConsumableEntry) => {
+    setEntryEdit(entry.entryId, toEntryEdit(entry));
+    setEntryActionEdit(entry.entryId, emptyActionEdit);
+    clearEntryError(entry.entryId);
   };
 
   return (
@@ -251,30 +365,58 @@ export function App() {
       {!isLoading && !error && consumableEntries.length > 0 && (
         <ul>
           {consumableEntries.map((entry) => {
-            const edit = entryEdits[entry.entryId] ?? {
-              quantity: String(entry.quantity),
-              unit: entry.unit,
-              expiresOn: entry.expiresOn ?? '',
-              storageSlotId: entry.storageSlotId ?? ''
-            };
-            const isExpired = entry.expiryStatus === 'Expired';
+            const edit = entryEdits[entry.entryId] ?? toEntryEdit(entry);
+            const actionEdit = entryActionEdits[entry.entryId] ?? emptyActionEdit;
+            const expiryStyle = getExpiryStyle(entry.expiryStatus);
+            const lotLocation = entry.storageSlotId || 'No location set';
             return (
               <li
                 key={entry.entryId}
                 style={{
-                  background: isExpired ? '#fee2e2' : undefined,
-                  borderLeft: isExpired ? '4px solid #dc2626' : undefined,
+                  ...expiryStyle,
                   marginBottom: 8,
                   padding: 8
                 }}
               >
-                <strong>{entry.itemName}</strong> - {entry.quantity} {entry.unit} - {entry.expiresOn ?? 'No expiry'} - {entry.expiryStatus}
-                {entry.storageSlotId && <> - {entry.storageSlotId}</>}
+                <strong>{entry.itemName}</strong>
+                <div>Lot {entry.entryId}</div>
                 <div>
+                  Quantity: {entry.quantity} {entry.unit} | Expiry: {entry.expiresOn ?? 'No expiry'} ({entry.expiryStatus}) | Location: {lotLocation}
+                </div>
+                {entryErrors[entry.entryId] && <p role="alert">{entryErrors[entry.entryId]}</p>}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+                  <label>
+                    Add stock
+                    <input
+                      aria-label={`Add stock amount for ${entry.itemName} lot ${entry.entryId}`}
+                      type="number"
+                      step="any"
+                      min={0}
+                      value={actionEdit.addStock}
+                      onChange={(e) => setEntryActionEdit(entry.entryId, { addStock: e.target.value })}
+                    />
+                  </label>
+                  <button onClick={() => onAddStock(entry)}>Add Stock</button>
+                  <label>
+                    Consume stock
+                    <input
+                      aria-label={`Consume stock amount for ${entry.itemName} lot ${entry.entryId}`}
+                      type="number"
+                      step="any"
+                      min={0}
+                      value={actionEdit.consumeStock}
+                      onChange={(e) => setEntryActionEdit(entry.entryId, { consumeStock: e.target.value })}
+                    />
+                  </label>
+                  <button onClick={() => onConsumeStock(entry)}>Consume Stock</button>
+                  <button onClick={() => onMarkLotDepleted(entry)}>Mark Lot Depleted</button>
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
                   <input
                     aria-label={`Entry quantity for ${entry.itemName}`}
                     type="number"
                     step="any"
+                    min={0}
                     value={edit.quantity}
                     onChange={(e) => setEntryEdit(entry.entryId, { quantity: e.target.value })}
                   />
@@ -295,7 +437,8 @@ export function App() {
                     value={edit.storageSlotId}
                     onChange={(e) => setEntryEdit(entry.entryId, { storageSlotId: e.target.value })}
                   />
-                  <button style={{ marginLeft: 8 }} onClick={() => onSaveConsumableEntry(entry)}>Save Entry</button>
+                  <button onClick={() => onSaveConsumableEntry(entry)}>Adjust Quantity / Expiry / Location</button>
+                  <button onClick={() => onResetEntryEdit(entry)}>Undo Unsaved Changes</button>
                 </div>
               </li>
             );
@@ -325,6 +468,9 @@ export function App() {
               <li key={suggestion.itemDefinitionId}>
                 {suggestion.itemName}: {suggestion.suggestedPurchaseAmount} {suggestion.unit}
                 {suggestion.expiringSoonAmount > 0 && <> ({suggestion.expiringSoonAmount} about to expire)</>}
+                <div>
+                  Current: {suggestion.usableCurrentQuantity} {suggestion.unit}; Required: {suggestion.requiredAmount} {suggestion.unit}; Suggested: {suggestion.suggestedPurchaseAmount} {suggestion.unit}; Rule source: replenishment target
+                </div>
                 <span
                   aria-label={breakdown}
                   tabIndex={0}
