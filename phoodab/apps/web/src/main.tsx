@@ -463,14 +463,11 @@ export function App() {
       {!isLoading && !error && suggestions.length > 0 && (
         <ul>
           {suggestions.map((suggestion) => {
-            const breakdown = `Breakdown: desired ${suggestion.desiredQuantity} ${suggestion.unit}; usable ${suggestion.usableCurrentQuantity} ${suggestion.unit}; deficit ${suggestion.deficitAmount} ${suggestion.unit}; expiring soon ${suggestion.expiringSoonAmount} ${suggestion.unit}`;
+            const breakdown = `Breakdown: current ${suggestion.usableCurrentQuantity} ${suggestion.unit}; required ${suggestion.requiredAmount} ${suggestion.unit}; suggested ${suggestion.suggestedPurchaseAmount} ${suggestion.unit}; rule source replenishment target; desired ${suggestion.desiredQuantity} ${suggestion.unit}; usable ${suggestion.usableCurrentQuantity} ${suggestion.unit}; deficit ${suggestion.deficitAmount} ${suggestion.unit}; expiring soon ${suggestion.expiringSoonAmount} ${suggestion.unit}`;
             return (
               <li key={suggestion.itemDefinitionId}>
                 {suggestion.itemName}: {suggestion.suggestedPurchaseAmount} {suggestion.unit}
                 {suggestion.expiringSoonAmount > 0 && <> ({suggestion.expiringSoonAmount} about to expire)</>}
-                <div>
-                  Current: {suggestion.usableCurrentQuantity} {suggestion.unit}; Required: {suggestion.requiredAmount} {suggestion.unit}; Suggested: {suggestion.suggestedPurchaseAmount} {suggestion.unit}; Rule source: replenishment target
-                </div>
                 <span
                   aria-label={breakdown}
                   tabIndex={0}
