@@ -346,19 +346,58 @@ export function App() {
       {!isLoading && !error && rules.length === 0 && <p>No rules.</p>}
       {!isLoading && !error && rules.length > 0 && (
         <ul>
-          {rules.map((rule) => (
-            <li key={rule.id}>
-              {summary.find((x) => x.itemDefinitionId === rule.itemDefinitionId)?.itemName ?? rule.itemDefinitionId}:{' '}
-              <input type="number" step="any" value={rule.desiredAmount} onChange={(e) => setRules((cur) => cur.map((r) => (r.id === rule.id ? { ...r, desiredAmount: Number(e.target.value) } : r)))} />
-              <input value={rule.desiredUnit} onChange={(e) => setRules((cur) => cur.map((r) => (r.id === rule.id ? { ...r, desiredUnit: e.target.value } : r)))} />
-              <input type="number" min={0} value={rule.expiryWarningDays} onChange={(e) => setRules((cur) => cur.map((r) => (r.id === rule.id ? { ...r, expiryWarningDays: Number(e.target.value) } : r)))} />
-              <label>
-                Disabled
-                <input type="checkbox" checked={rule.isDisabled} onChange={(e) => setRules((cur) => cur.map((r) => (r.id === rule.id ? { ...r, isDisabled: e.target.checked } : r)))} />
-              </label>
-              <button style={{ marginLeft: 8 }} onClick={() => onSaveRule(rule)}>Save</button>
-            </li>
-          ))}
+          {rules.map((rule) => {
+            const itemName = summary.find((x) => x.itemDefinitionId === rule.itemDefinitionId)?.itemName ?? rule.itemDefinitionId;
+            return (
+              <li key={rule.id} style={{ marginBottom: 12 }}>
+                <strong>{itemName}</strong>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'end', marginTop: 4 }}>
+                  <label>
+                    Target amount
+                    <input
+                      aria-label={`Target amount for ${itemName}`}
+                      aria-description="Amount to keep stocked before replenishment is suggested."
+                      title="Amount to keep stocked before replenishment is suggested."
+                      type="number"
+                      step="any"
+                      value={rule.desiredAmount}
+                      onChange={(e) => setRules((cur) => cur.map((r) => (r.id === rule.id ? { ...r, desiredAmount: Number(e.target.value) } : r)))}
+                    />
+                  </label>
+                  <label>
+                    Target unit
+                    <input
+                      aria-label={`Target unit for ${itemName}`}
+                      value={rule.desiredUnit}
+                      onChange={(e) => setRules((cur) => cur.map((r) => (r.id === rule.id ? { ...r, desiredUnit: e.target.value } : r)))}
+                    />
+                  </label>
+                  <label>
+                    Expiry warning days
+                    <input
+                      aria-label={`Expiry warning days for ${itemName}`}
+                      aria-description="Treat entries expiring within this many days as warning items."
+                      title="Treat entries expiring within this many days as warning items."
+                      type="number"
+                      min={0}
+                      value={rule.expiryWarningDays}
+                      onChange={(e) => setRules((cur) => cur.map((r) => (r.id === rule.id ? { ...r, expiryWarningDays: Number(e.target.value) } : r)))}
+                    />
+                  </label>
+                  <label>
+                    Disabled
+                    <input
+                      aria-label={`Disable replenishment rule for ${itemName}`}
+                      type="checkbox"
+                      checked={rule.isDisabled}
+                      onChange={(e) => setRules((cur) => cur.map((r) => (r.id === rule.id ? { ...r, isDisabled: e.target.checked } : r)))}
+                    />
+                  </label>
+                  <button aria-label={`Save replenishment rule for ${itemName}`} onClick={() => onSaveRule(rule)}>Save</button>
+                </div>
+              </li>
+            );
+          })}
         </ul>
       )}
 
