@@ -18,6 +18,7 @@ public interface IInventoryMvpStore
     void EnsureDevelopmentSeedData(DateOnly todayUtc);
     object CreateOrUpdateShoppingListItemFromSuggestion(Guid itemDefinitionId, decimal quantity, string unit, decimal? deficitAmount, decimal? expiringSoonAmount, decimal? suggestedPurchaseAmount);
     object? UpdateShoppingListItemStatus(Guid shoppingListItemId, bool? isResolved, bool? isPurchased, string? status);
+    bool DeleteShoppingListItem(Guid shoppingListItemId);
     IReadOnlyList<object> GetShoppingListItems();
 }
 
@@ -328,6 +329,23 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
                 .Select(x => ToShoppingListReadModel(x, x.ItemName))
                 .Cast<object>()
                 .ToList();
+        }
+    }
+
+    public bool DeleteShoppingListItem(Guid shoppingListItemId)
+    {
+        lock (_sync)
+        {
+            var state = LoadState();
+            var existing = state.ShoppingListItems.SingleOrDefault(x => x.Id == shoppingListItemId);
+            if (existing is null)
+            {
+                return false;
+            }
+
+            state.ShoppingListItems.Remove(existing);
+            SaveState(state);
+            return true;
         }
     }
 

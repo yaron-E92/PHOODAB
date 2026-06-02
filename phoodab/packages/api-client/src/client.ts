@@ -205,6 +205,14 @@ export async function updateShoppingListItemStatus(baseUrl: string, shoppingList
   return response.json();
 }
 
+export async function deleteShoppingListItem(baseUrl: string, shoppingListItemId: string): Promise<void> {
+  const response = await fetch(`${baseUrl}/api/shopping-list-items/${shoppingListItemId}`, {
+    method: 'DELETE'
+  });
+
+  if (!response.ok) throw new Error(`Delete shopping list item failed: ${response.status}`);
+}
+
 export async function getShoppingListItems(baseUrl: string): Promise<ShoppingListItem[]> {
   const response = await fetch(`${baseUrl}/api/shopping-list-items`);
   if (!response.ok) throw new Error(`Shopping list items failed: ${response.status}`);

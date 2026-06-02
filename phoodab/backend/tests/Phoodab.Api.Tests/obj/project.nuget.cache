@@ -1,0 +1,17 @@
+{
+  "version": 2,
+  "dgSpecHash": "aHbo7bgjSKk=",
+  "success": false,
+  "projectFilePath": "C:\\Users\\yaref92\\codex-automation-workspace\\PHOODAB-automation\\phoodab\\backend\\tests\\Phoodab.Api.Tests\\Phoodab.Api.Tests.csproj",
+  "expectedPackageFiles": [],
+  "logs": [
+    {
+      "code": "NU1301",
+      "level": "Error",
+      "message": "Failed to retrieve information about 'Yaref92.Events' from remote source 'https://nuget.pkg.github.com/yaron-E92/download/yaref92.events/index.json'.\r\n  Response status code does not indicate success: 401 (Unauthorized).",
+      "projectPath": "C:\\Users\\yaref92\\codex-automation-workspace\\PHOODAB-automation\\phoodab\\backend\\tests\\Phoodab.Api.Tests\\Phoodab.Api.Tests.csproj",
+      "filePath": "C:\\Users\\yaref92\\codex-automation-workspace\\PHOODAB-automation\\phoodab\\backend\\tests\\Phoodab.Api.Tests\\Phoodab.Api.Tests.csproj",
+      "targetGraphs": []
+    }
+  ]
+}

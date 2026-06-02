@@ -592,6 +592,13 @@ public class SmokeTests
             Assert.That(patched.GetProperty("stockUpdateNeeded").GetBoolean(), Is.False);
             Assert.That(patched.GetProperty("nextInventoryAction").ValueKind, Is.EqualTo(JsonValueKind.Null));
         });
+
+        var deleteResponse = await _client.DeleteAsync($"/api/shopping-list-items/{shoppingItem.GetProperty("id").GetGuid()}");
+        Assert.That(deleteResponse.StatusCode, Is.EqualTo(HttpStatusCode.NoContent));
+
+        var shoppingItems = JsonSerializer.Deserialize<JsonElement>(await (await _client.GetAsync("/api/shopping-list-items")).Content.ReadAsStringAsync())
+            .EnumerateArray().ToList();
+        Assert.That(shoppingItems.Any(x => x.GetProperty("id").GetGuid() == shoppingItem.GetProperty("id").GetGuid()), Is.False);
     }
 
     private async Task<Guid> CreateConsumableItem(string name, decimal? desiredAmount = null, string? desiredUnit = null)

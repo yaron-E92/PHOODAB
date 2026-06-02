@@ -132,6 +132,10 @@ app.MapPatch("/api/shopping-list-items/{shoppingListItemId:guid}", (Guid shoppin
     return item is null ? Results.NotFound() : Results.Ok(item);
 }).WithOpenApi();
 
+app.MapDelete("/api/shopping-list-items/{shoppingListItemId:guid}", (Guid shoppingListItemId, IInventoryMvpStore store) =>
+    store.DeleteShoppingListItem(shoppingListItemId) ? Results.NoContent() : Results.NotFound())
+.WithOpenApi();
+
 app.MapGet("/api/shopping-list-items", (IInventoryMvpStore store) => Results.Ok(store.GetShoppingListItems())).WithOpenApi();
 
 app.MapGet("/replenishment/suggestions", (ReplenishmentSuggestionService suggestionService, IInventoryMvpStore store) =>
