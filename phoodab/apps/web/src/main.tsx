@@ -56,6 +56,25 @@ const getExpiryStyle = (expiryStatus: ConsumableEntry['expiryStatus']): React.CS
   return { borderLeft: '4px solid #16a34a' };
 };
 
+const getShoppingStatus = (item: ShoppingListItem): ShoppingListItem['status'] => {
+  if (item.status) return item.status;
+  if (item.isPurchased) return item.isResolved ? 'Bought' : 'StockUpdateNeeded';
+  return 'ShoppingList';
+};
+
+const getShoppingStatusLabel = (item: ShoppingListItem) => {
+  switch (getShoppingStatus(item)) {
+    case 'InCart':
+      return 'In cart / buying';
+    case 'Bought':
+      return 'Bought';
+    case 'StockUpdateNeeded':
+      return 'Stock update needed';
+    default:
+      return 'Added to shopping list';
+  }
+};
+
 export function App() {
   const [health, setHealth] = useState<string>('loading');
   const [version, setVersion] = useState<string>('loading');
@@ -124,8 +143,13 @@ export function App() {
     await loadData();
   };
 
-  const onMarkPurchased = async (item: ShoppingListItem) => {
-    await updateShoppingListItemStatus(baseUrl, item.id, { isResolved: true, isPurchased: true });
+  const onMoveToCart = async (item: ShoppingListItem) => {
+    await updateShoppingListItemStatus(baseUrl, item.id, { status: 'InCart' });
+    await loadData();
+  };
+
+  const onMarkBought = async (item: ShoppingListItem) => {
+    await updateShoppingListItemStatus(baseUrl, item.id, { status: 'Bought' });
     await loadData();
   };
 
@@ -464,6 +488,7 @@ export function App() {
         <ul>
           {suggestions.map((suggestion) => {
             const breakdown = `Breakdown: current ${suggestion.usableCurrentQuantity} ${suggestion.unit}; required ${suggestion.requiredAmount} ${suggestion.unit}; suggested ${suggestion.suggestedPurchaseAmount} ${suggestion.unit}; rule source replenishment target; desired ${suggestion.desiredQuantity} ${suggestion.unit}; usable ${suggestion.usableCurrentQuantity} ${suggestion.unit}; deficit ${suggestion.deficitAmount} ${suggestion.unit}; expiring soon ${suggestion.expiringSoonAmount} ${suggestion.unit}`;
+            const activeShoppingItem = shoppingListItems.find((item) => item.itemDefinitionId === suggestion.itemDefinitionId && !item.isPurchased);
             return (
               <li key={suggestion.itemDefinitionId}>
                 {suggestion.itemName}: {suggestion.suggestedPurchaseAmount} {suggestion.unit}
@@ -476,9 +501,13 @@ export function App() {
                 >
                   Breakdown
                 </span>
-                <button style={{ marginLeft: 8 }} onClick={() => onCreateFromSuggestion(suggestion)}>
-                  Add to Shopping List
-                </button>
+                {activeShoppingItem ? (
+                  <span style={{ marginLeft: 8 }}>[{getShoppingStatusLabel(activeShoppingItem)}]</span>
+                ) : (
+                  <button style={{ marginLeft: 8 }} onClick={() => onCreateFromSuggestion(suggestion)}>
+                    Add to Shopping List
+                  </button>
+                )}
               </li>
             );
           })}
@@ -548,16 +577,28 @@ export function App() {
       {!isLoading && !error && shoppingListItems.length === 0 && <p>No shopping items.</p>}
       {!isLoading && !error && shoppingListItems.length > 0 && (
         <ul>
-          {shoppingListItems.map((item) => (
-            <li key={item.id}>
-              {item.itemName}: {item.quantity} {item.unit} [{item.isPurchased ? 'Purchased' : item.isResolved ? 'Resolved' : 'Open'}]
-              {!item.isPurchased && (
-                <button style={{ marginLeft: 8 }} onClick={() => onMarkPurchased(item)}>
-                  Mark Purchased
-                </button>
-              )}
-            </li>
-          ))}
+          {shoppingListItems.map((item) => {
+            const status = getShoppingStatus(item);
+            const stockAction = item.nextInventoryAction ?? (item.stockUpdateNeeded ? 'Add stock details for quantity, lot, expiry, and location.' : null);
+            return (
+              <li key={item.id}>
+                {item.itemName}: {item.quantity} {item.unit} [{getShoppingStatusLabel(item)}]
+                {status === 'ShoppingList' && (
+                  <button style={{ marginLeft: 8 }} onClick={() => onMoveToCart(item)}>
+                    Add to Cart
+                  </button>
+                )}
+                {status === 'InCart' && (
+                  <button style={{ marginLeft: 8 }} onClick={() => onMarkBought(item)}>
+                    Mark Bought
+                  </button>
+                )}
+                {(item.stockUpdateNeeded || status === 'Bought' || status === 'StockUpdateNeeded') && stockAction && (
+                  <div>Stock update needed: {stockAction}</div>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
     </main>

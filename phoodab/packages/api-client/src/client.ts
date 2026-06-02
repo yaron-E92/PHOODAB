@@ -68,6 +68,9 @@ export type ShoppingListItem = {
   unit: string;
   isResolved: boolean;
   isPurchased: boolean;
+  status: 'ShoppingList' | 'InCart' | 'Bought' | 'StockUpdateNeeded';
+  stockUpdateNeeded: boolean;
+  nextInventoryAction: string | null;
   sourceDeficitAmount: number | null;
   sourceExpiringSoonAmount: number | null;
   sourceSuggestedPurchaseAmount: number | null;
@@ -191,7 +194,7 @@ export async function createShoppingListItemFromSuggestion(baseUrl: string, payl
   return response.json();
 }
 
-export async function updateShoppingListItemStatus(baseUrl: string, shoppingListItemId: string, payload: { isResolved?: boolean; isPurchased?: boolean }): Promise<ShoppingListItem> {
+export async function updateShoppingListItemStatus(baseUrl: string, shoppingListItemId: string, payload: { isResolved?: boolean; isPurchased?: boolean; status?: ShoppingListItem['status'] }): Promise<ShoppingListItem> {
   const response = await fetch(`${baseUrl}/api/shopping-list-items/${shoppingListItemId}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },

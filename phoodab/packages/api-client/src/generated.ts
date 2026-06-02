@@ -603,6 +603,7 @@ export interface components {
         UpdateShoppingListItemStatusRequest: {
             isResolved?: boolean | null;
             isPurchased?: boolean | null;
+            status?: string | null;
         };
         VersionResponse: {
             version: string;
