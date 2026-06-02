@@ -6,7 +6,39 @@ namespace Phoodab.Application;
 public interface IInventoryMvpStore
 {
     ItemDefinition CreateItemDefinition(string name, ItemKind kind, decimal? desiredAmount = null, string? desiredUnit = null);
-    DurableEntry? CreateDurableEntry(Guid itemDefinitionId, Guid? storageSlotId);
+    DurableItemReadModel CreateDurableItem(
+        string displayName,
+        string? description,
+        string? itemType,
+        string? brandManufacturer,
+        string? model,
+        string? serialNumber,
+        DateOnly? purchaseDate,
+        decimal? purchaseValue,
+        DateOnly? warrantyEndsOn,
+        DurableItemStatus status,
+        string? currentLocation,
+        string? notes,
+        Guid? storageSlotId);
+    DurableItemReadModel? CreateDurableEntry(Guid itemDefinitionId, Guid? storageSlotId);
+    IReadOnlyList<DurableItemReadModel> GetDurableEntries();
+    DurableItemReadModel? GetDurableEntry(Guid entryId);
+    DurableItemReadModel? UpdateDurableEntry(
+        Guid entryId,
+        string displayName,
+        string? description,
+        string? itemType,
+        string? brandManufacturer,
+        string? model,
+        string? serialNumber,
+        DateOnly? purchaseDate,
+        decimal? purchaseValue,
+        DateOnly? warrantyEndsOn,
+        DurableItemStatus status,
+        string? currentLocation,
+        string? notes,
+        Guid? storageSlotId);
+    DurableItemReadModel? RetireDurableEntry(Guid entryId, string? notes);
     ConsumableEntry? AddConsumableEntry(Guid itemDefinitionId, decimal quantity, string unit, DateOnly? expiresOn, Guid? storageSlotId);
     IReadOnlyList<object> GetSummary();
     IReadOnlyList<ConsumableEntryReadModel> GetConsumableEntryReadModels(DateOnly todayUtc);
@@ -62,7 +94,49 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
         }
     }
 
-    public DurableEntry? CreateDurableEntry(Guid itemDefinitionId, Guid? storageSlotId)
+    public DurableItemReadModel CreateDurableItem(
+        string displayName,
+        string? description,
+        string? itemType,
+        string? brandManufacturer,
+        string? model,
+        string? serialNumber,
+        DateOnly? purchaseDate,
+        decimal? purchaseValue,
+        DateOnly? warrantyEndsOn,
+        DurableItemStatus status,
+        string? currentLocation,
+        string? notes,
+        Guid? storageSlotId)
+    {
+        lock (_sync)
+        {
+            var state = LoadState();
+            var item = new ItemDefinition(Guid.NewGuid(), displayName, ItemKind.Durable);
+            var entry = new DurableEntry(
+                Guid.NewGuid(),
+                item,
+                storageSlotId,
+                description,
+                itemType,
+                brandManufacturer,
+                model,
+                serialNumber,
+                purchaseDate,
+                purchaseValue,
+                warrantyEndsOn,
+                status,
+                currentLocation,
+                notes);
+
+            state.ItemDefinitions.Add(new ItemDefinitionState(item.Id, item.Name, item.Kind));
+            state.DurableEntries.Add(ToDurableEntryState(entry));
+            SaveState(state);
+            return ToDurableItemReadModel(entry);
+        }
+    }
+
+    public DurableItemReadModel? CreateDurableEntry(Guid itemDefinitionId, Guid? storageSlotId)
     {
         lock (_sync)
         {
@@ -75,9 +149,116 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
 
             var item = new ItemDefinition(itemState.Id, itemState.Name, itemState.Kind);
             var entry = new DurableEntry(Guid.NewGuid(), item, storageSlotId);
-            state.DurableEntries.Add(new DurableEntryState(entry.Id, entry.ItemDefinitionId, entry.StorageSlotId));
+            state.DurableEntries.Add(ToDurableEntryState(entry));
             SaveState(state);
-            return entry;
+            return ToDurableItemReadModel(entry);
+        }
+    }
+
+    public IReadOnlyList<DurableItemReadModel> GetDurableEntries()
+    {
+        lock (_sync)
+        {
+            var state = LoadState();
+            return [.. state.DurableEntries.Select(entry => ToDurableItemReadModel(state, entry))];
+        }
+    }
+
+    public DurableItemReadModel? GetDurableEntry(Guid entryId)
+    {
+        lock (_sync)
+        {
+            var state = LoadState();
+            var existing = state.DurableEntries.SingleOrDefault(entry => entry.Id == entryId);
+            return existing is null ? null : ToDurableItemReadModel(state, existing);
+        }
+    }
+
+    public DurableItemReadModel? UpdateDurableEntry(
+        Guid entryId,
+        string displayName,
+        string? description,
+        string? itemType,
+        string? brandManufacturer,
+        string? model,
+        string? serialNumber,
+        DateOnly? purchaseDate,
+        decimal? purchaseValue,
+        DateOnly? warrantyEndsOn,
+        DurableItemStatus status,
+        string? currentLocation,
+        string? notes,
+        Guid? storageSlotId)
+    {
+        lock (_sync)
+        {
+            var state = LoadState();
+            var existing = state.DurableEntries.SingleOrDefault(entry => entry.Id == entryId);
+            if (existing is null)
+            {
+                return null;
+            }
+
+            var itemState = state.ItemDefinitions.Single(item => item.Id == existing.ItemDefinitionId);
+            var item = new ItemDefinition(itemState.Id, displayName, ItemKind.Durable);
+            var entry = new DurableEntry(
+                entryId,
+                item,
+                storageSlotId,
+                description,
+                itemType,
+                brandManufacturer,
+                model,
+                serialNumber,
+                purchaseDate,
+                purchaseValue,
+                warrantyEndsOn,
+                status,
+                currentLocation,
+                notes);
+
+            state.ItemDefinitions.Remove(itemState);
+            state.ItemDefinitions.Add(new ItemDefinitionState(item.Id, item.Name, item.Kind));
+            state.DurableEntries.Remove(existing);
+            state.DurableEntries.Add(ToDurableEntryState(entry));
+            SaveState(state);
+            return ToDurableItemReadModel(entry);
+        }
+    }
+
+    public DurableItemReadModel? RetireDurableEntry(Guid entryId, string? notes)
+    {
+        lock (_sync)
+        {
+            var state = LoadState();
+            var existing = state.DurableEntries.SingleOrDefault(entry => entry.Id == entryId);
+            if (existing is null)
+            {
+                return null;
+            }
+
+            var itemState = state.ItemDefinitions.Single(item => item.Id == existing.ItemDefinitionId);
+            var item = new ItemDefinition(itemState.Id, itemState.Name, itemState.Kind);
+            var entry = new DurableEntry(
+                existing.Id,
+                item,
+                existing.StorageSlotId,
+                existing.Description,
+                existing.ItemType,
+                existing.BrandManufacturer,
+                existing.Model,
+                existing.SerialNumber,
+                existing.PurchaseDate,
+                existing.PurchaseValue,
+                existing.WarrantyEndsOn,
+                DurableItemStatus.Retired,
+                existing.CurrentLocation,
+                string.IsNullOrWhiteSpace(notes) ? existing.Notes : notes);
+
+            state.DurableEntries.Remove(existing);
+            state.DurableEntries.Add(ToDurableEntryState(entry));
+            SaveState(state);
+            return ToDurableItemReadModel(entry);
         }
     }
 
@@ -467,6 +648,67 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
             normalized.IsDisabled ?? false);
     }
 
+    private static DurableEntryState ToDurableEntryState(DurableEntry entry)
+    {
+        return new DurableEntryState(
+            entry.Id,
+            entry.ItemDefinitionId,
+            entry.StorageSlotId,
+            entry.Description,
+            entry.ItemType,
+            entry.BrandManufacturer,
+            entry.Model,
+            entry.SerialNumber,
+            entry.PurchaseDate,
+            entry.PurchaseValue,
+            entry.WarrantyEndsOn,
+            entry.Status,
+            entry.CurrentLocation,
+            entry.Notes);
+    }
+
+    private static DurableItemReadModel ToDurableItemReadModel(InventoryMvpState state, DurableEntryState entryState)
+    {
+        var itemState = state.ItemDefinitions.Single(item => item.Id == entryState.ItemDefinitionId);
+        var item = new ItemDefinition(itemState.Id, itemState.Name, ItemKind.Durable);
+        var entry = new DurableEntry(
+            entryState.Id,
+            item,
+            entryState.StorageSlotId,
+            entryState.Description,
+            entryState.ItemType,
+            entryState.BrandManufacturer,
+            entryState.Model,
+            entryState.SerialNumber,
+            entryState.PurchaseDate,
+            entryState.PurchaseValue,
+            entryState.WarrantyEndsOn,
+            entryState.Status,
+            entryState.CurrentLocation,
+            entryState.Notes);
+        return ToDurableItemReadModel(entry);
+    }
+
+    private static DurableItemReadModel ToDurableItemReadModel(DurableEntry entry)
+    {
+        return new DurableItemReadModel(
+            entry.Id,
+            entry.ItemDefinitionId,
+            entry.DisplayName,
+            entry.Description,
+            entry.ItemType,
+            entry.BrandManufacturer,
+            entry.Model,
+            entry.SerialNumber,
+            entry.PurchaseDate,
+            entry.PurchaseValue,
+            entry.WarrantyEndsOn,
+            entry.Status.ToString(),
+            entry.CurrentLocation,
+            entry.Notes,
+            entry.StorageSlotId);
+    }
+
     private static object ToShoppingListReadModel(ShoppingListItemState state, string itemName) => new
     {
         id = state.Id,
@@ -541,8 +783,39 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
     }
 
     private sealed record ItemDefinitionState(Guid Id, string Name, ItemKind Kind);
-    private sealed record DurableEntryState(Guid Id, Guid ItemDefinitionId, Guid? StorageSlotId);
+    private sealed record DurableEntryState(
+        Guid Id,
+        Guid ItemDefinitionId,
+        Guid? StorageSlotId,
+        string? Description = null,
+        string? ItemType = null,
+        string? BrandManufacturer = null,
+        string? Model = null,
+        string? SerialNumber = null,
+        DateOnly? PurchaseDate = null,
+        decimal? PurchaseValue = null,
+        DateOnly? WarrantyEndsOn = null,
+        DurableItemStatus Status = DurableItemStatus.Active,
+        string? CurrentLocation = null,
+        string? Notes = null);
     private sealed record ConsumableEntryState(Guid Id, Guid ItemDefinitionId, decimal Quantity, string Unit, DateOnly? ExpiresOn, Guid? StorageSlotId);
     private sealed record ReplenishmentRuleState(Guid Id, Guid ItemDefinitionId, decimal? TargetAmount, string? Unit, int? ExpiryWarningDays, bool IsHidden, bool? IsDisabled);
     private sealed record ShoppingListItemState(Guid Id, Guid ItemDefinitionId, string ItemName, decimal Quantity, string Unit, bool IsResolved, bool IsPurchased, string? Status = null, decimal? SourceDeficitAmount = null, decimal? SourceExpiringSoonAmount = null, decimal? SourceSuggestedPurchaseAmount = null);
 }
+
+public sealed record DurableItemReadModel(
+    Guid Id,
+    Guid ItemDefinitionId,
+    string DisplayName,
+    string? Description,
+    string? ItemType,
+    string? BrandManufacturer,
+    string? Model,
+    string? SerialNumber,
+    DateOnly? PurchaseDate,
+    decimal? PurchaseValue,
+    DateOnly? WarrantyEndsOn,
+    string Status,
+    string? CurrentLocation,
+    string? Notes,
+    Guid? StorageSlotId);

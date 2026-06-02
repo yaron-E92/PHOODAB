@@ -76,6 +76,8 @@ public class SmokeTests
 
         Assert.That(paths.TryGetProperty("/api/item-definitions", out _), Is.True);
         Assert.That(paths.TryGetProperty("/api/durable-entries", out _), Is.True);
+        Assert.That(paths.TryGetProperty("/api/durable-entries/{entryId}", out _), Is.True);
+        Assert.That(paths.TryGetProperty("/api/durable-entries/{entryId}/retire", out _), Is.True);
         Assert.That(paths.TryGetProperty("/api/consumable-entries", out _), Is.True);
         Assert.That(paths.TryGetProperty("/api/consumable-entries/{entryId}", out _), Is.True);
         Assert.That(paths.TryGetProperty("/api/inventory/summary", out _), Is.True);
@@ -357,6 +359,90 @@ public class SmokeTests
             .EnumerateArray().ToList();
 
         Assert.That(rules.Any(x => x.GetProperty("itemDefinitionId").GetGuid() == itemId), Is.False);
+    }
+
+    [Test]
+    public async Task Durable_entries_can_be_created_listed_updated_viewed_and_retired()
+    {
+        var purchasedOn = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(-10));
+        var warrantyEndsOn = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddYears(1));
+        var createResponse = await _client.PostAsJsonAsync("/api/durable-entries", new
+        {
+            displayName = "Vacuum",
+            description = "Cordless cleaner",
+            itemType = "Appliance",
+            brandManufacturer = "Acme",
+            model = "V100",
+            serialNumber = "SN-123",
+            purchaseDate = purchasedOn,
+            purchaseValue = 149.99m,
+            warrantyEndsOn,
+            status = "Active",
+            currentLocation = "Utility closet",
+            notes = "Includes wall mount",
+            storageSlotId = (Guid?)null
+        });
+        Assert.That(createResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+
+        var created = JsonSerializer.Deserialize<JsonElement>(await createResponse.Content.ReadAsStringAsync());
+        var entryId = created.GetProperty("id").GetGuid();
+        var itemDefinitionId = created.GetProperty("itemDefinitionId").GetGuid();
+        Assert.Multiple(() =>
+        {
+            Assert.That(created.GetProperty("displayName").GetString(), Is.EqualTo("Vacuum"));
+            Assert.That(created.GetProperty("itemType").GetString(), Is.EqualTo("Appliance"));
+            Assert.That(created.GetProperty("brandManufacturer").GetString(), Is.EqualTo("Acme"));
+            Assert.That(created.GetProperty("status").GetString(), Is.EqualTo("Active"));
+            Assert.That(created.TryGetProperty("quantity", out _), Is.False);
+        });
+
+        var list = JsonSerializer.Deserialize<JsonElement>(await (await _client.GetAsync("/api/durable-entries")).Content.ReadAsStringAsync())
+            .EnumerateArray().ToList();
+        Assert.That(list.Single(x => x.GetProperty("id").GetGuid() == entryId).GetProperty("displayName").GetString(), Is.EqualTo("Vacuum"));
+
+        var getResponse = await _client.GetAsync($"/api/durable-entries/{entryId}");
+        Assert.That(getResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        var fetched = JsonSerializer.Deserialize<JsonElement>(await getResponse.Content.ReadAsStringAsync());
+        Assert.That(fetched.GetProperty("itemDefinitionId").GetGuid(), Is.EqualTo(itemDefinitionId));
+
+        var updateResponse = await _client.PatchAsJsonAsync($"/api/durable-entries/{entryId}", new
+        {
+            displayName = "Workshop vacuum",
+            description = "Updated description",
+            itemType = "Tool",
+            brandManufacturer = "Acme",
+            model = "V200",
+            serialNumber = "SN-456",
+            purchaseDate = purchasedOn,
+            purchaseValue = 199.50m,
+            warrantyEndsOn,
+            status = "NeedsRepair",
+            currentLocation = "Garage",
+            notes = "Broken hose",
+            storageSlotId = (Guid?)null
+        });
+        Assert.That(updateResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        var updated = JsonSerializer.Deserialize<JsonElement>(await updateResponse.Content.ReadAsStringAsync());
+        Assert.Multiple(() =>
+        {
+            Assert.That(updated.GetProperty("displayName").GetString(), Is.EqualTo("Workshop vacuum"));
+            Assert.That(updated.GetProperty("status").GetString(), Is.EqualTo("NeedsRepair"));
+            Assert.That(updated.GetProperty("currentLocation").GetString(), Is.EqualTo("Garage"));
+            Assert.That(updated.GetProperty("purchaseValue").GetDecimal(), Is.EqualTo(199.50m));
+        });
+
+        var retireResponse = await _client.PatchAsJsonAsync($"/api/durable-entries/{entryId}/retire", new { notes = "Replaced by newer unit" });
+        Assert.That(retireResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        var retired = JsonSerializer.Deserialize<JsonElement>(await retireResponse.Content.ReadAsStringAsync());
+        Assert.Multiple(() =>
+        {
+            Assert.That(retired.GetProperty("status").GetString(), Is.EqualTo("Retired"));
+            Assert.That(retired.GetProperty("notes").GetString(), Is.EqualTo("Replaced by newer unit"));
+        });
+
+        var rules = JsonSerializer.Deserialize<JsonElement>(await (await _client.GetAsync("/api/replenishment/rules")).Content.ReadAsStringAsync())
+            .EnumerateArray().ToList();
+        Assert.That(rules.Any(x => x.GetProperty("itemDefinitionId").GetGuid() == itemDefinitionId), Is.False);
     }
 
     [Test]

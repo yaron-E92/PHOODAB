@@ -28,6 +28,53 @@ public class InventoryDomainModelsTests
     }
 
     [Test]
+    public void Durable_entry_keeps_first_class_item_details_without_quantity()
+    {
+        var durable = new ItemDefinition(Guid.NewGuid(), "Vacuum", ItemKind.Durable);
+        var purchasedOn = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(-30));
+        var warrantyEndsOn = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddYears(2));
+
+        var entry = new DurableEntry(
+            Guid.NewGuid(),
+            durable,
+            description: "Cordless cleaner",
+            itemType: "Appliance",
+            brandManufacturer: "Acme",
+            model: "V100",
+            serialNumber: "SN-123",
+            purchaseDate: purchasedOn,
+            purchaseValue: 149.99m,
+            warrantyEndsOn: warrantyEndsOn,
+            status: DurableItemStatus.NeedsRepair,
+            currentLocation: "Utility closet",
+            notes: "Needs a new filter");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(entry.DisplayName, Is.EqualTo("Vacuum"));
+            Assert.That(entry.Description, Is.EqualTo("Cordless cleaner"));
+            Assert.That(entry.ItemType, Is.EqualTo("Appliance"));
+            Assert.That(entry.BrandManufacturer, Is.EqualTo("Acme"));
+            Assert.That(entry.Model, Is.EqualTo("V100"));
+            Assert.That(entry.SerialNumber, Is.EqualTo("SN-123"));
+            Assert.That(entry.PurchaseDate, Is.EqualTo(purchasedOn));
+            Assert.That(entry.PurchaseValue, Is.EqualTo(149.99m));
+            Assert.That(entry.WarrantyEndsOn, Is.EqualTo(warrantyEndsOn));
+            Assert.That(entry.Status, Is.EqualTo(DurableItemStatus.NeedsRepair));
+            Assert.That(entry.CurrentLocation, Is.EqualTo("Utility closet"));
+            Assert.That(entry.Notes, Is.EqualTo("Needs a new filter"));
+        });
+    }
+
+    [Test]
+    public void Durable_entry_rejects_negative_purchase_value()
+    {
+        var durable = new ItemDefinition(Guid.NewGuid(), "Vacuum", ItemKind.Durable);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => new DurableEntry(Guid.NewGuid(), durable, purchaseValue: -1m));
+    }
+
+    [Test]
     public void Empty_storage_slot_id_is_rejected_when_provided()
     {
         var durable = new ItemDefinition(Guid.NewGuid(), "Mop", ItemKind.Durable);

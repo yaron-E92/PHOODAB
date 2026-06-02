@@ -59,9 +59,111 @@ app.MapPost("/api/item-definitions", (CreateItemDefinitionRequest request, IInve
 
 app.MapPost("/api/durable-entries", (CreateDurableEntryRequest request, IInventoryMvpStore store) =>
 {
-    var entry = store.CreateDurableEntry(request.ItemDefinitionId, request.StorageSlotId);
+    if (!TryParseDurableStatus(request.Status, out var status))
+    {
+        return Results.BadRequest(new ErrorResponse("Unsupported durable item status."));
+    }
+
+    if (request.ItemDefinitionId.HasValue && string.IsNullOrWhiteSpace(request.DisplayName))
+    {
+        var existingEntry = store.CreateDurableEntry(request.ItemDefinitionId.Value, request.StorageSlotId);
+        return existingEntry is null ? Results.NotFound() : Results.Ok(existingEntry);
+    }
+
+    if (string.IsNullOrWhiteSpace(request.DisplayName))
+    {
+        return Results.BadRequest(new ErrorResponse("Display name is required."));
+    }
+
+    try
+    {
+        var entry = store.CreateDurableItem(
+            request.DisplayName,
+            request.Description,
+            request.ItemType,
+            request.BrandManufacturer,
+            request.Model,
+            request.SerialNumber,
+            request.PurchaseDate,
+            request.PurchaseValue,
+            request.WarrantyEndsOn,
+            status ?? DurableItemStatus.Active,
+            request.CurrentLocation,
+            request.Notes,
+            request.StorageSlotId);
+        return Results.Ok(entry);
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new ErrorResponse(ex.Message));
+    }
+}).Produces<DurableItemReadModel>(StatusCodes.Status200OK)
+.Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
+.Produces(StatusCodes.Status404NotFound)
+.WithOpenApi();
+
+app.MapGet("/api/durable-entries", (IInventoryMvpStore store) => Results.Ok(store.GetDurableEntries()))
+.Produces<IEnumerable<DurableItemReadModel>>(StatusCodes.Status200OK)
+.WithOpenApi();
+
+app.MapGet("/api/durable-entries/{entryId:guid}", (Guid entryId, IInventoryMvpStore store) =>
+{
+    var entry = store.GetDurableEntry(entryId);
     return entry is null ? Results.NotFound() : Results.Ok(entry);
-}).WithOpenApi();
+})
+.Produces<DurableItemReadModel>(StatusCodes.Status200OK)
+.Produces(StatusCodes.Status404NotFound)
+.WithOpenApi();
+
+app.MapPatch("/api/durable-entries/{entryId:guid}", (Guid entryId, UpdateDurableEntryRequest request, IInventoryMvpStore store) =>
+{
+    if (string.IsNullOrWhiteSpace(request.DisplayName))
+    {
+        return Results.BadRequest(new ErrorResponse("Display name is required."));
+    }
+
+    if (!TryParseDurableStatus(request.Status, out var status))
+    {
+        return Results.BadRequest(new ErrorResponse("Unsupported durable item status."));
+    }
+
+    try
+    {
+        var entry = store.UpdateDurableEntry(
+            entryId,
+            request.DisplayName,
+            request.Description,
+            request.ItemType,
+            request.BrandManufacturer,
+            request.Model,
+            request.SerialNumber,
+            request.PurchaseDate,
+            request.PurchaseValue,
+            request.WarrantyEndsOn,
+            status ?? DurableItemStatus.Active,
+            request.CurrentLocation,
+            request.Notes,
+            request.StorageSlotId);
+        return entry is null ? Results.NotFound() : Results.Ok(entry);
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new ErrorResponse(ex.Message));
+    }
+})
+.Produces<DurableItemReadModel>(StatusCodes.Status200OK)
+.Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
+.Produces(StatusCodes.Status404NotFound)
+.WithOpenApi();
+
+app.MapPatch("/api/durable-entries/{entryId:guid}/retire", (Guid entryId, RetireDurableEntryRequest request, IInventoryMvpStore store) =>
+{
+    var entry = store.RetireDurableEntry(entryId, request.Notes);
+    return entry is null ? Results.NotFound() : Results.Ok(entry);
+})
+.Produces<DurableItemReadModel>(StatusCodes.Status200OK)
+.Produces(StatusCodes.Status404NotFound)
+.WithOpenApi();
 
 app.MapPost("/api/consumable-entries", (CreateConsumableEntryRequest request, IInventoryMvpStore store) =>
 {
@@ -157,12 +259,60 @@ static ReplenishmentRuleResponse ToReplenishmentRuleResponse(ReplenishmentRule r
         rule.IsDisabled);
 }
 
+static bool TryParseDurableStatus(string? status, out DurableItemStatus? parsed)
+{
+    parsed = null;
+    if (string.IsNullOrWhiteSpace(status))
+    {
+        return true;
+    }
+
+    if (Enum.TryParse<DurableItemStatus>(status.Trim(), ignoreCase: true, out var value) &&
+        Enum.IsDefined(typeof(DurableItemStatus), value))
+    {
+        parsed = value;
+        return true;
+    }
+
+    return false;
+}
+
 app.Run();
 
+public sealed record ErrorResponse([property: Required] string Message);
 public sealed record HealthResponse([property: Required] string Status);
 public sealed record VersionResponse([property: Required] string Version);
 public sealed record CreateItemDefinitionRequest(string Name, ItemKind Kind, decimal? DesiredAmount, string? DesiredUnit);
-public sealed record CreateDurableEntryRequest(Guid ItemDefinitionId, Guid? StorageSlotId);
+public sealed record CreateDurableEntryRequest(
+    Guid? ItemDefinitionId,
+    string? DisplayName,
+    string? Description,
+    string? ItemType,
+    string? BrandManufacturer,
+    string? Model,
+    string? SerialNumber,
+    DateOnly? PurchaseDate,
+    decimal? PurchaseValue,
+    DateOnly? WarrantyEndsOn,
+    string? Status,
+    string? CurrentLocation,
+    string? Notes,
+    Guid? StorageSlotId);
+public sealed record UpdateDurableEntryRequest(
+    string DisplayName,
+    string? Description,
+    string? ItemType,
+    string? BrandManufacturer,
+    string? Model,
+    string? SerialNumber,
+    DateOnly? PurchaseDate,
+    decimal? PurchaseValue,
+    DateOnly? WarrantyEndsOn,
+    string? Status,
+    string? CurrentLocation,
+    string? Notes,
+    Guid? StorageSlotId);
+public sealed record RetireDurableEntryRequest(string? Notes);
 public sealed record CreateConsumableEntryRequest(Guid ItemDefinitionId, decimal Quantity, string Unit, DateOnly? ExpiresOn, Guid? StorageSlotId);
 public sealed record UpdateConsumableEntryRequest(decimal Quantity, string Unit, DateOnly? ExpiresOn, Guid? StorageSlotId);
 public sealed record CreateShoppingListItemFromSuggestionRequest(Guid ItemDefinitionId, decimal Quantity, string Unit, decimal? DeficitAmount, decimal? ExpiringSoonAmount, decimal? SuggestedPurchaseAmount);
