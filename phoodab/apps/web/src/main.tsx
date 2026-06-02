@@ -593,7 +593,7 @@ export function App() {
                     Mark Bought
                   </button>
                 )}
-                {(item.stockUpdateNeeded || status === 'Bought' || status === 'StockUpdateNeeded') && stockAction && (
+                {(item.stockUpdateNeeded || status === 'StockUpdateNeeded') && stockAction && (
                   <div>Stock update needed: {stockAction}</div>
                 )}
               </li>

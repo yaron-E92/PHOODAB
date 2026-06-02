@@ -459,8 +459,8 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
         isResolved = state.IsResolved,
         isPurchased = state.IsPurchased,
         status = DeriveShoppingStatus(state),
-        stockUpdateNeeded = DeriveShoppingStatus(state) is ShoppingStatusBought or ShoppingStatusStockUpdateNeeded,
-        nextInventoryAction = DeriveShoppingStatus(state) is ShoppingStatusBought or ShoppingStatusStockUpdateNeeded ? StockUpdateAction : null,
+        stockUpdateNeeded = DeriveShoppingStatus(state) is ShoppingStatusStockUpdateNeeded,
+        nextInventoryAction = DeriveShoppingStatus(state) is ShoppingStatusStockUpdateNeeded ? StockUpdateAction : null,
         sourceDeficitAmount = state.SourceDeficitAmount,
         sourceExpiringSoonAmount = state.SourceExpiringSoonAmount,
         sourceSuggestedPurchaseAmount = state.SourceSuggestedPurchaseAmount

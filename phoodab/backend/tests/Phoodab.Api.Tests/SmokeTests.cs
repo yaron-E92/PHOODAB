@@ -589,8 +589,8 @@ public class SmokeTests
             Assert.That(patched.GetProperty("status").GetString(), Is.EqualTo("Bought"));
             Assert.That(patched.GetProperty("isResolved").GetBoolean(), Is.True);
             Assert.That(patched.GetProperty("isPurchased").GetBoolean(), Is.True);
-            Assert.That(patched.GetProperty("stockUpdateNeeded").GetBoolean(), Is.True);
-            Assert.That(patched.GetProperty("nextInventoryAction").GetString(), Is.EqualTo("Add stock details for quantity, lot, expiry, and location."));
+            Assert.That(patched.GetProperty("stockUpdateNeeded").GetBoolean(), Is.False);
+            Assert.That(patched.GetProperty("nextInventoryAction").ValueKind, Is.EqualTo(JsonValueKind.Null));
         });
     }
 

@@ -232,8 +232,8 @@ describe('pantry mvp page', () => {
         isResolved: true,
         isPurchased: true,
         status: 'Bought',
-        stockUpdateNeeded: true,
-        nextInventoryAction: 'Add stock details for quantity, lot, expiry, and location.',
+        stockUpdateNeeded: false,
+        nextInventoryAction: null,
         sourceDeficitAmount: 2,
         sourceExpiringSoonAmount: 0,
         sourceSuggestedPurchaseAmount: 2
@@ -254,7 +254,7 @@ describe('pantry mvp page', () => {
     expect(container.textContent).toContain('Milk: 5 liter [Added to shopping list]');
     expect(container.textContent).toContain('Eggs: 1 dozen [In cart / buying]');
     expect(container.textContent).toContain('Rice: 2 kg [Bought]');
-    expect(container.textContent).toContain('Stock update needed: Add stock details for quantity, lot, expiry, and location.');
+    expect(container.textContent).not.toContain('Stock update needed: Add stock details for quantity, lot, expiry, and location.');
 
     await act(async () => {
       Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Add to Cart')!.click();
