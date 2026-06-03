@@ -80,7 +80,26 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DurableItemReadModel"][];
+                    };
+                };
+            };
+        };
         put?: never;
         post: {
             parameters: {
@@ -100,6 +119,24 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
+                    content: {
+                        "application/json": components["schemas"]["DurableItemReadModel"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
                     content?: never;
                 };
             };
@@ -108,6 +145,140 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/durable-entries/{entryId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** Format: uuid */
+                    entryId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DurableItemReadModel"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    entryId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["UpdateDurableEntryRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DurableItemReadModel"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/api/durable-entries/{entryId}/retire": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    entryId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["RetireDurableEntryRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DurableItemReadModel"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
         trace?: never;
     };
     "/api/consumable-entries": {
@@ -184,7 +355,6 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    /** Format: uuid */
                     entryId: string;
                 };
                 cookie?: never;
@@ -438,8 +608,8 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description No Content */
-                204: {
+                /** @description OK */
+                200: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -528,23 +698,6 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        CreateDurableEntryRequest: {
-            /** Format: uuid */
-            itemDefinitionId?: string;
-            /** Format: uuid */
-            storageSlotId?: string | null;
-        };
-        CreateConsumableEntryRequest: {
-            /** Format: uuid */
-            itemDefinitionId?: string;
-            /** Format: double */
-            quantity?: number;
-            unit?: string | null;
-            /** Format: date */
-            expiresOn?: string | null;
-            /** Format: uuid */
-            storageSlotId?: string | null;
-        };
         ConsumableEntryReadModel: {
             /** Format: uuid */
             entryId: string;
@@ -559,6 +712,38 @@ export interface components {
             /** Format: int32 */
             expiresInDays?: number | null;
             expiryStatus: string;
+            /** Format: uuid */
+            storageSlotId?: string | null;
+        };
+        CreateConsumableEntryRequest: {
+            /** Format: uuid */
+            itemDefinitionId?: string;
+            /** Format: double */
+            quantity?: number;
+            unit?: string | null;
+            /** Format: date */
+            expiresOn?: string | null;
+            /** Format: uuid */
+            storageSlotId?: string | null;
+        };
+        CreateDurableEntryRequest: {
+            /** Format: uuid */
+            itemDefinitionId?: string | null;
+            displayName?: string | null;
+            description?: string | null;
+            itemType?: string | null;
+            brandManufacturer?: string | null;
+            model?: string | null;
+            serialNumber?: string | null;
+            /** Format: date */
+            purchaseDate?: string | null;
+            /** Format: double */
+            purchaseValue?: number | null;
+            /** Format: date */
+            warrantyEndsOn?: string | null;
+            status?: string | null;
+            currentLocation?: string | null;
+            notes?: string | null;
             /** Format: uuid */
             storageSlotId?: string | null;
         };
@@ -585,6 +770,32 @@ export interface components {
         HealthResponse: {
             status: string;
         };
+        DurableItemReadModel: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            itemDefinitionId?: string;
+            displayName?: string | null;
+            description?: string | null;
+            itemType?: string | null;
+            brandManufacturer?: string | null;
+            model?: string | null;
+            serialNumber?: string | null;
+            /** Format: date */
+            purchaseDate?: string | null;
+            /** Format: double */
+            purchaseValue?: number | null;
+            /** Format: date */
+            warrantyEndsOn?: string | null;
+            status?: string | null;
+            currentLocation?: string | null;
+            notes?: string | null;
+            /** Format: uuid */
+            storageSlotId?: string | null;
+        };
+        ErrorResponse: {
+            message: string;
+        };
         /**
          * Format: int32
          * @enum {integer}
@@ -602,13 +813,8 @@ export interface components {
             expiryWarningDays: number;
             isDisabled: boolean;
         };
-        UpdateReplenishmentRuleRequest: {
-            /** Format: double */
-            desiredAmount?: number | null;
-            desiredUnit?: string | null;
-            isDisabled?: boolean | null;
-            /** Format: int32 */
-            expiryWarningDays?: number | null;
+        RetireDurableEntryRequest: {
+            notes?: string | null;
         };
         UpdateConsumableEntryRequest: {
             /** Format: double */
@@ -618,6 +824,33 @@ export interface components {
             expiresOn?: string | null;
             /** Format: uuid */
             storageSlotId?: string | null;
+        };
+        UpdateDurableEntryRequest: {
+            displayName?: string | null;
+            description?: string | null;
+            itemType?: string | null;
+            brandManufacturer?: string | null;
+            model?: string | null;
+            serialNumber?: string | null;
+            /** Format: date */
+            purchaseDate?: string | null;
+            /** Format: double */
+            purchaseValue?: number | null;
+            /** Format: date */
+            warrantyEndsOn?: string | null;
+            status?: string | null;
+            currentLocation?: string | null;
+            notes?: string | null;
+            /** Format: uuid */
+            storageSlotId?: string | null;
+        };
+        UpdateReplenishmentRuleRequest: {
+            /** Format: double */
+            desiredAmount?: number | null;
+            desiredUnit?: string | null;
+            isDisabled?: boolean | null;
+            /** Format: int32 */
+            expiryWarningDays?: number | null;
         };
         UpdateShoppingListItemStatusRequest: {
             isResolved?: boolean | null;
