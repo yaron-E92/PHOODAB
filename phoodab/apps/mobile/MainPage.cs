@@ -7,6 +7,8 @@ namespace Phoodab.Mobile;
 public sealed class MainPage : ContentPage
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private const string TargetAmountHelp = "Amount to keep stocked before replenishment is suggested.";
+    private const string ExpiryWarningDaysHelp = "Treat entries expiring within this many days as warning items.";
 
     private readonly HttpClient _httpClient;
     private readonly Entry _baseUrlEntry = new() { Text = "http://localhost:5199", Placeholder = "API base URL" };
@@ -89,8 +91,8 @@ public sealed class MainPage : ContentPage
         AddConsumableAuditSection();
         AddExpiringSection();
         AddSuggestionsSection();
-        AddShoppingSection();
         AddRulesSection();
+        AddShoppingSection();
     }
 
     private async Task LoadDataAsync()
@@ -272,12 +274,19 @@ public sealed class MainPage : ContentPage
         {
             foreach (var suggestion in _suggestions)
             {
+                var breakdown = SuggestionBreakdown(suggestion);
                 var layout = new VerticalStackLayout { Spacing = 8 };
                 layout.Children.Add(new Label { Text = suggestion.ItemName, FontAttributes = FontAttributes.Bold });
                 layout.Children.Add(new Label
                 {
                     Text = $"Buy {suggestion.SuggestedPurchaseAmount.ToString(CultureInfo.InvariantCulture)} {suggestion.Unit}; desired {suggestion.DesiredQuantity.ToString(CultureInfo.InvariantCulture)}, usable {suggestion.UsableCurrentQuantity.ToString(CultureInfo.InvariantCulture)}, deficit {suggestion.DeficitAmount.ToString(CultureInfo.InvariantCulture)}, expiring soon {suggestion.ExpiringSoonAmount.ToString(CultureInfo.InvariantCulture)}"
                 });
+                layout.Children.Add(WithHelp(new Label
+                {
+                    Text = "Breakdown",
+                    TextColor = Colors.DarkBlue,
+                    TextDecorations = TextDecorations.Underline
+                }, breakdown));
                 layout.Children.Add(Button("Add To Shopping List", async () => await CreateShoppingItemFromSuggestionAsync(suggestion)));
                 section.Children.Add(Card(layout));
             }
@@ -362,6 +371,7 @@ public sealed class MainPage : ContentPage
 
     private View RuleCard(ReplenishmentRule rule)
     {
+        var itemName = RuleItemName(rule);
         var desiredAmount = new Entry
         {
             Text = rule.DesiredAmount.ToString(CultureInfo.InvariantCulture),
@@ -378,19 +388,23 @@ public sealed class MainPage : ContentPage
         var disabled = new CheckBox { IsChecked = rule.IsDisabled };
 
         var layout = new VerticalStackLayout { Spacing = 8 };
-        layout.Children.Add(new Label { Text = rule.ItemName, FontAttributes = FontAttributes.Bold });
-        layout.Children.Add(GridRows(desiredAmount, desiredUnit));
-        layout.Children.Add(warningDays);
+        layout.Children.Add(new Label { Text = $"Item: {itemName}", FontAttributes = FontAttributes.Bold });
+        layout.Children.Add(GridRows(
+            LabeledField("Target amount", desiredAmount, $"Target amount for {itemName}", TargetAmountHelp),
+            LabeledField("Target unit", desiredUnit, $"Target unit for {itemName}")));
+        layout.Children.Add(LabeledField("Expiry warning days", warningDays, $"Expiry warning days for {itemName}", ExpiryWarningDaysHelp));
         layout.Children.Add(new HorizontalStackLayout
         {
             Spacing = 8,
             Children =
             {
-                new Label { Text = "Disable rule", VerticalOptions = LayoutOptions.Center },
-                disabled
+                new Label { Text = "Disabled", VerticalOptions = LayoutOptions.Center },
+                WithDescription(disabled, $"Disable replenishment rule for {itemName}")
             }
         });
-        layout.Children.Add(Button("Save Rule", async () => await SaveRuleAsync(rule, desiredAmount.Text, desiredUnit.Text, warningDays.Text, disabled.IsChecked)));
+        layout.Children.Add(WithDescription(
+            Button("Save", async () => await SaveRuleAsync(rule, desiredAmount.Text, desiredUnit.Text, warningDays.Text, disabled.IsChecked)),
+            $"Save replenishment rule for {itemName}"));
 
         return Card(layout);
     }
@@ -833,6 +847,52 @@ public sealed class MainPage : ContentPage
             "Soon" => Colors.Goldenrod,
             _ => Colors.Green
         };
+    }
+
+    private string RuleItemName(ReplenishmentRule rule)
+    {
+        return _summary.FirstOrDefault(item => item.ItemDefinitionId == rule.ItemDefinitionId)?.ItemName
+            ?? (!string.IsNullOrWhiteSpace(rule.ItemName) ? rule.ItemName : rule.ItemDefinitionId);
+    }
+
+    private static string SuggestionBreakdown(ReplenishmentSuggestion suggestion)
+    {
+        return $"Breakdown: current {suggestion.UsableCurrentQuantity.ToString(CultureInfo.InvariantCulture)} {suggestion.Unit}; required {suggestion.RequiredAmount.ToString(CultureInfo.InvariantCulture)} {suggestion.Unit}; suggested {suggestion.SuggestedPurchaseAmount.ToString(CultureInfo.InvariantCulture)} {suggestion.Unit}; rule source replenishment target; desired {suggestion.DesiredQuantity.ToString(CultureInfo.InvariantCulture)} {suggestion.Unit}; usable {suggestion.UsableCurrentQuantity.ToString(CultureInfo.InvariantCulture)} {suggestion.Unit}; deficit {suggestion.DeficitAmount.ToString(CultureInfo.InvariantCulture)} {suggestion.Unit}; expiring soon {suggestion.ExpiringSoonAmount.ToString(CultureInfo.InvariantCulture)} {suggestion.Unit}";
+    }
+
+    private static View LabeledField(string labelText, View field, string description, string? help = null)
+    {
+        var label = new Label { Text = labelText };
+        WithDescription(field, description);
+
+        if (!string.IsNullOrWhiteSpace(help))
+        {
+            WithHelp(label, help);
+            WithHelp(field, help);
+        }
+
+        return new VerticalStackLayout
+        {
+            Spacing = 4,
+            Children =
+            {
+                label,
+                field
+            }
+        };
+    }
+
+    private static T WithHelp<T>(T view, string help) where T : View
+    {
+        ToolTipProperties.SetText(view, help);
+        SemanticProperties.SetHint(view, help);
+        return view;
+    }
+
+    private static T WithDescription<T>(T view, string description) where T : View
+    {
+        SemanticProperties.SetDescription(view, description);
+        return view;
     }
 
     private sealed record ItemOption(string Id, string Label)
