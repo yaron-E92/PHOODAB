@@ -22,6 +22,7 @@ public sealed class MainPage : ContentPage
     private readonly Entry _expiryDateEntry = new() { Placeholder = "Expiry date YYYY-MM-DD (optional)" };
     private readonly Entry _storageSlotEntry = new() { Placeholder = "Storage slot ID (optional)" };
     private readonly VerticalStackLayout _content = new() { Spacing = 16, Padding = 16 };
+    private readonly VerticalStackLayout _dataContent = new() { Spacing = 16 };
 
     private readonly List<ItemOption> _createdItems = [];
     private readonly List<InventorySummaryItem> _summary = [];
@@ -40,7 +41,8 @@ public sealed class MainPage : ContentPage
         BackgroundColor = Colors.White;
 
         Content = new ScrollView { Content = _content };
-        Rebuild();
+        BuildShell();
+        RebuildDataSections();
     }
 
     protected override async void OnAppearing()
@@ -58,7 +60,7 @@ public sealed class MainPage : ContentPage
 
     private string BaseUrl => (_baseUrlEntry.Text ?? string.Empty).Trim().TrimEnd('/');
 
-    private void Rebuild()
+    private void BuildShell()
     {
         _content.Children.Clear();
         _content.Children.Add(new Label
@@ -77,6 +79,12 @@ public sealed class MainPage : ContentPage
 
         AddCreateItemSection();
         AddEntrySection();
+        _content.Children.Add(_dataContent);
+    }
+
+    private void RebuildDataSections()
+    {
+        _dataContent.Children.Clear();
         AddInventorySummarySection();
         AddConsumableAuditSection();
         AddExpiringSection();
@@ -118,7 +126,7 @@ public sealed class MainPage : ContentPage
         }
 
         RefreshItemPicker();
-        Rebuild();
+        RebuildDataSections();
     }
 
     private void AddCreateItemSection()
@@ -170,7 +178,7 @@ public sealed class MainPage : ContentPage
             }
         }
 
-        _content.Children.Add(section);
+        _dataContent.Children.Add(section);
     }
 
     private void AddConsumableAuditSection()
@@ -189,7 +197,7 @@ public sealed class MainPage : ContentPage
             }
         }
 
-        _content.Children.Add(section);
+        _dataContent.Children.Add(section);
     }
 
     private View EntryCard(ConsumableEntry entry)
@@ -249,7 +257,7 @@ public sealed class MainPage : ContentPage
             }
         }
 
-        _content.Children.Add(section);
+        _dataContent.Children.Add(section);
     }
 
     private void AddSuggestionsSection()
@@ -275,7 +283,7 @@ public sealed class MainPage : ContentPage
             }
         }
 
-        _content.Children.Add(section);
+        _dataContent.Children.Add(section);
     }
 
     private void AddShoppingSection()
@@ -307,7 +315,7 @@ public sealed class MainPage : ContentPage
             }
         }
 
-        _content.Children.Add(section);
+        _dataContent.Children.Add(section);
     }
 
     private View ShoppingButtons(ShoppingListItem item)
@@ -349,7 +357,7 @@ public sealed class MainPage : ContentPage
             }
         }
 
-        _content.Children.Add(section);
+        _dataContent.Children.Add(section);
     }
 
     private View RuleCard(ReplenishmentRule rule)
