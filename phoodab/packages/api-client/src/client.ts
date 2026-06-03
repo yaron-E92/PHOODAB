@@ -6,6 +6,10 @@ type ReplenishmentRulesResponse = paths['/api/replenishment/rules']['get']['resp
 type UpdateReplenishmentRuleRequest = paths['/api/replenishment/rules/{ruleId}']['patch']['requestBody']['content']['application/json'];
 type CreateConsumableEntryRequest = paths['/api/consumable-entries']['post']['requestBody']['content']['application/json'];
 type UpdateConsumableEntryRequest = paths['/api/consumable-entries/{entryId}']['patch']['requestBody']['content']['application/json'];
+type DurableItemsResponse = paths['/api/durable-entries']['get']['responses']['200']['content']['application/json'];
+type CreateDurableEntryRequest = paths['/api/durable-entries']['post']['requestBody']['content']['application/json'];
+type UpdateDurableEntryRequest = paths['/api/durable-entries/{entryId}']['patch']['requestBody']['content']['application/json'];
+type RetireDurableEntryRequest = paths['/api/durable-entries/{entryId}/retire']['patch']['requestBody']['content']['application/json'];
 
 export type ItemDefinition = {
   id: string;
@@ -36,6 +40,11 @@ export type ConsumableEntry = {
 };
 
 export type ExpiringConsumableEntry = ConsumableEntry;
+
+export type DurableItemStatus = 'Active' | 'NeedsRepair' | 'LoanedOut' | 'Stored' | 'Retired' | 'Lost';
+export type DurableItem = DurableItemsResponse[number] & {
+  status: DurableItemStatus;
+};
 
 export type ReplenishmentSuggestion = {
   itemDefinitionId: string;
@@ -123,6 +132,65 @@ export async function addConsumableEntry(
   });
 
   if (!response.ok) throw new Error(`Add consumable entry failed: ${response.status}`);
+}
+
+export async function createDurableItem(
+  baseUrl: string,
+  payload: CreateDurableEntryRequest
+): Promise<DurableItem> {
+  const response = await fetch(`${baseUrl}/api/durable-entries`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) throw new Error(`Create durable item failed: ${response.status}`);
+
+  return response.json();
+}
+
+export async function getDurableItems(baseUrl: string): Promise<DurableItem[]> {
+  const response = await fetch(`${baseUrl}/api/durable-entries`);
+  if (!response.ok) throw new Error(`Durable items failed: ${response.status}`);
+  return response.json();
+}
+
+export async function getDurableItem(baseUrl: string, entryId: string): Promise<DurableItem> {
+  const response = await fetch(`${baseUrl}/api/durable-entries/${entryId}`);
+  if (!response.ok) throw new Error(`Durable item failed: ${response.status}`);
+  return response.json();
+}
+
+export async function updateDurableItem(
+  baseUrl: string,
+  entryId: string,
+  payload: UpdateDurableEntryRequest
+): Promise<DurableItem> {
+  const response = await fetch(`${baseUrl}/api/durable-entries/${entryId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) throw new Error(`Update durable item failed: ${response.status}`);
+
+  return response.json();
+}
+
+export async function retireDurableItem(
+  baseUrl: string,
+  entryId: string,
+  payload: RetireDurableEntryRequest
+): Promise<DurableItem> {
+  const response = await fetch(`${baseUrl}/api/durable-entries/${entryId}/retire`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) throw new Error(`Retire durable item failed: ${response.status}`);
+
+  return response.json();
 }
 
 export async function getInventorySummary(baseUrl: string): Promise<InventorySummaryItem[]> {
