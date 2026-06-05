@@ -105,21 +105,16 @@ public sealed class MainPage : ContentPage
 
         try
         {
-            await Task.Yield();
-
-            var todayUtc = _utcDateProvider.TodayUtc;
-            var entries = _store.GetConsumableEntryReadModels(todayUtc)
-                .Select(ToMobileEntry)
-                .ToList();
+            var snapshot = await LoadPantrySnapshotAsync();
 
             _healthLabel.Text = "Health: local app services";
             _versionLabel.Text = $"Version: {typeof(App).Assembly.GetName().Version?.ToString() ?? "0.0.0"}";
-            Replace(_summary, ProjectList<InventorySummaryItem>(_store.GetSummary()));
-            Replace(_consumableEntries, entries);
-            Replace(_expiringEntries, _store.GetExpiringConsumableEntries(todayUtc).Select(ToMobileEntry).ToList());
-            Replace(_suggestions, _suggestionService.GetSuggestions(_store.GetRules(), _store.GetConsumableEntries()).Select(ToMobileSuggestion).ToList());
-            Replace(_shoppingListItems, ProjectList<ShoppingListItem>(_store.GetShoppingListItems()));
-            Replace(_rules, _store.GetRules().Select(ToMobileRule).ToList());
+            Replace(_summary, snapshot.Summary);
+            Replace(_consumableEntries, snapshot.ConsumableEntries);
+            Replace(_expiringEntries, snapshot.ExpiringEntries);
+            Replace(_suggestions, snapshot.Suggestions);
+            Replace(_shoppingListItems, snapshot.ShoppingListItems);
+            Replace(_rules, snapshot.Rules);
             SetStatus(string.Empty, isError: false);
         }
         catch (Exception ex)
@@ -129,6 +124,24 @@ public sealed class MainPage : ContentPage
 
         RefreshItemPicker();
         RebuildDataSections();
+    }
+
+    private Task<PantrySnapshot> LoadPantrySnapshotAsync()
+    {
+        return Task.Run(() =>
+        {
+            var todayUtc = _utcDateProvider.TodayUtc;
+            var rules = _store.GetRules();
+            var entries = _store.GetConsumableEntries();
+
+            return new PantrySnapshot(
+                ProjectList<InventorySummaryItem>(_store.GetSummary()),
+                _store.GetConsumableEntryReadModels(todayUtc).Select(ToMobileEntry).ToList(),
+                _store.GetExpiringConsumableEntries(todayUtc).Select(ToMobileEntry).ToList(),
+                _suggestionService.GetSuggestions(rules, entries).Select(ToMobileSuggestion).ToList(),
+                ProjectList<ShoppingListItem>(_store.GetShoppingListItems()),
+                rules.Select(ToMobileRule).ToList());
+        });
     }
 
     private void AddCreateItemSection()
@@ -1033,4 +1046,11 @@ public sealed class MainPage : ContentPage
     private sealed record ReplenishmentSuggestion(string ItemDefinitionId, string ItemName, decimal CurrentQuantity, decimal UsableCurrentQuantity, decimal DesiredQuantity, decimal DeficitAmount, decimal ExpiringSoonAmount, decimal SuggestedPurchaseAmount, decimal RequiredAmount, string Unit, List<ConsumableEntry> Entries);
     private sealed record ReplenishmentRule(string Id, string ItemDefinitionId, string ItemName, decimal DesiredAmount, string DesiredUnit, int ExpiryWarningDays, bool IsDisabled);
     private sealed record ShoppingListItem(string Id, string ItemDefinitionId, string ItemName, decimal Quantity, string Unit, bool IsResolved, bool IsPurchased, string Status, bool StockUpdateNeeded, string? NextInventoryAction, decimal? SourceDeficitAmount, decimal? SourceExpiringSoonAmount, decimal? SourceSuggestedPurchaseAmount);
+    private sealed record PantrySnapshot(
+        List<InventorySummaryItem> Summary,
+        List<ConsumableEntry> ConsumableEntries,
+        List<ConsumableEntry> ExpiringEntries,
+        List<ReplenishmentSuggestion> Suggestions,
+        List<ShoppingListItem> ShoppingListItems,
+        List<ReplenishmentRule> Rules);
 }
