@@ -4,7 +4,7 @@ Initial .NET MAUI frontend for the PHOODAB pantry MVP.
 
 The app mirrors the current web MVP at functional depth:
 
-- health/version startup checks
+- local health/version startup checks
 - consumable item creation
 - consumable entry creation and lot audit actions
 - expiring consumable visibility
@@ -12,9 +12,10 @@ The app mirrors the current web MVP at functional depth:
 - shopping-list status actions
 - replenishment rule editing
 
-The default API base URL is `http://localhost:5199`. When running against an
-Android emulator, use `http://10.0.2.2:5199` in the API base URL field so the
-emulator can reach the host backend.
+The app uses the shared PHOODAB application services in-process for normal
+local pantry data, so it does not require a separately hosted backend for the
+current MVP flows. Android emulator host networking (`http://10.0.2.2:5199`)
+can remain a development fallback for future remote/API adapter testing.
 
 Build from the repository root with:
 
