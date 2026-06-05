@@ -1,6 +1,6 @@
 namespace Phoodab.Mobile;
 
-public sealed class App : Application
+public sealed class App : Microsoft.Maui.Controls.Application
 {
     private readonly MainPage _mainPage;
 
