@@ -12,11 +12,18 @@ import {
   getShoppingListItems,
   getVersion,
   createShoppingListItemFromSuggestion,
+  createDurableItem,
   updateShoppingListItemStatus,
   deleteShoppingListItem,
+  getDurableItem,
+  getDurableItems,
+  retireDurableItem,
   updateConsumableEntry,
+  updateDurableItem,
   type ConsumableEntry,
   updateReplenishmentRule,
+  type DurableItem,
+  type DurableItemStatus,
   type ExpiringConsumableEntry,
   type InventorySummaryItem,
   type ReplenishmentSuggestion,
@@ -29,6 +36,39 @@ const baseUrl = 'http://localhost:5199';
 
 type EntryEdit = { quantity: string; unit: string; expiresOn: string; storageSlotId: string };
 type EntryActionEdit = { addStock: string; addStockUnit: string; consumeStock: string; consumeStockUnit: string };
+type DurableItemForm = {
+  displayName: string;
+  description: string;
+  itemType: string;
+  brandManufacturer: string;
+  model: string;
+  serialNumber: string;
+  purchaseDate: string;
+  purchaseValue: string;
+  warrantyEndsOn: string;
+  status: DurableItemStatus;
+  currentLocation: string;
+  notes: string;
+  storageSlotId: string;
+};
+
+const durableStatuses: DurableItemStatus[] = ['Active', 'NeedsRepair', 'LoanedOut', 'Stored', 'Retired', 'Lost'];
+
+const emptyDurableItemForm: DurableItemForm = {
+  displayName: '',
+  description: '',
+  itemType: '',
+  brandManufacturer: '',
+  model: '',
+  serialNumber: '',
+  purchaseDate: '',
+  purchaseValue: '',
+  warrantyEndsOn: '',
+  status: 'Active',
+  currentLocation: '',
+  notes: '',
+  storageSlotId: ''
+};
 
 const toEntryEdit = (entry: ConsumableEntry): EntryEdit => ({
   quantity: String(entry.quantity),
@@ -48,6 +88,34 @@ const parseQuantity = (value: string) => {
   const quantity = Number(value);
   return Number.isFinite(quantity) ? quantity : null;
 };
+
+const toNullableString = (value: string) => {
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+};
+
+const getDurableDisplayName = (item: DurableItem) => item.displayName?.trim() || 'Unnamed durable item';
+
+const getWarrantyIndicator = (item: DurableItem) => {
+  if (!item.warrantyEndsOn) return 'No warranty recorded';
+  return `Warranty through ${item.warrantyEndsOn}`;
+};
+
+const toDurableItemForm = (item: DurableItem): DurableItemForm => ({
+  displayName: item.displayName ?? '',
+  description: item.description ?? '',
+  itemType: item.itemType ?? '',
+  brandManufacturer: item.brandManufacturer ?? '',
+  model: item.model ?? '',
+  serialNumber: item.serialNumber ?? '',
+  purchaseDate: item.purchaseDate ?? '',
+  purchaseValue: item.purchaseValue == null ? '' : String(item.purchaseValue),
+  warrantyEndsOn: item.warrantyEndsOn ?? '',
+  status: item.status,
+  currentLocation: item.currentLocation ?? '',
+  notes: item.notes ?? '',
+  storageSlotId: item.storageSlotId ?? ''
+});
 
 const getExpiryStyle = (expiryStatus: ConsumableEntry['expiryStatus']): React.CSSProperties => {
   if (expiryStatus === 'Expired') {
@@ -104,6 +172,11 @@ export function App() {
   const [createdItems, setCreatedItems] = useState<ItemDefinition[]>([]);
   const [shoppingListItems, setShoppingListItems] = useState<ShoppingListItem[]>([]);
   const [rules, setRules] = useState<ReplenishmentRule[]>([]);
+  const [durableItems, setDurableItems] = useState<DurableItem[]>([]);
+  const [durableForm, setDurableForm] = useState<DurableItemForm>(emptyDurableItemForm);
+  const [editingDurableItemId, setEditingDurableItemId] = useState<string | null>(null);
+  const [selectedDurableItem, setSelectedDurableItem] = useState<DurableItem | null>(null);
+  const [durableDetailLoading, setDurableDetailLoading] = useState(false);
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -113,13 +186,14 @@ export function App() {
     setError(null);
 
     try {
-      const [summaryData, entriesData, expiringData, suggestionData, shoppingData, rulesData] = await Promise.all([
+      const [summaryData, entriesData, expiringData, suggestionData, shoppingData, rulesData, durableData] = await Promise.all([
         getInventorySummary(baseUrl),
         getConsumableEntries(baseUrl),
         getExpiringConsumableEntries(baseUrl),
         getReplenishmentSuggestions(baseUrl),
         getShoppingListItems(baseUrl),
-        getReplenishmentRules(baseUrl)
+        getReplenishmentRules(baseUrl),
+        getDurableItems(baseUrl)
       ]);
       setSummary(summaryData);
       setConsumableEntries(entriesData);
@@ -130,6 +204,7 @@ export function App() {
       setSuggestions(suggestionData);
       setShoppingListItems(shoppingData);
       setRules(rulesData);
+      setDurableItems(durableData);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -162,6 +237,103 @@ export function App() {
   const onDeleteShoppingItem = async (item: ShoppingListItem) => {
     await deleteShoppingListItem(baseUrl, item.id);
     await loadData();
+  };
+
+  const setDurableFormField = (field: keyof DurableItemForm, value: string) => {
+    setDurableForm((current) => ({ ...current, [field]: value }));
+  };
+
+  const getDurablePayload = () => {
+    const purchaseValue = durableForm.purchaseValue.trim() ? Number(durableForm.purchaseValue) : null;
+
+    if (!durableForm.displayName.trim()) {
+      setError('Durable item name is required.');
+      return null;
+    }
+
+    if (purchaseValue !== null && !Number.isFinite(purchaseValue)) {
+      setError('Purchase value must be a valid number.');
+      return null;
+    }
+
+    return {
+      displayName: durableForm.displayName.trim(),
+      description: toNullableString(durableForm.description),
+      itemType: toNullableString(durableForm.itemType),
+      brandManufacturer: toNullableString(durableForm.brandManufacturer),
+      model: toNullableString(durableForm.model),
+      serialNumber: toNullableString(durableForm.serialNumber),
+      purchaseDate: durableForm.purchaseDate || null,
+      purchaseValue,
+      warrantyEndsOn: durableForm.warrantyEndsOn || null,
+      status: durableForm.status,
+      currentLocation: toNullableString(durableForm.currentLocation),
+      notes: toNullableString(durableForm.notes),
+      storageSlotId: toNullableString(durableForm.storageSlotId)
+    };
+  };
+
+  const onSaveDurableItem = async (event: React.FormEvent) => {
+    event.preventDefault();
+
+    const payload = getDurablePayload();
+    if (!payload) return;
+
+    try {
+      const saved = editingDurableItemId
+        ? await updateDurableItem(baseUrl, editingDurableItemId, payload)
+        : await createDurableItem(baseUrl, payload);
+
+      setSelectedDurableItem(saved);
+      setDurableForm(emptyDurableItemForm);
+      setEditingDurableItemId(null);
+      setError(null);
+      await loadData();
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const onOpenDurableItem = async (item: DurableItem) => {
+    if (!item.id) return;
+
+    setDurableDetailLoading(true);
+    setError(null);
+
+    try {
+      const detail = await getDurableItem(baseUrl, item.id);
+      setSelectedDurableItem(detail);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setDurableDetailLoading(false);
+    }
+  };
+
+  const onEditDurableItem = (item: DurableItem) => {
+    if (!item.id) return;
+
+    setEditingDurableItemId(item.id);
+    setDurableForm(toDurableItemForm(item));
+    setSelectedDurableItem(item);
+  };
+
+  const onCancelDurableEdit = () => {
+    setEditingDurableItemId(null);
+    setDurableForm(emptyDurableItemForm);
+  };
+
+  const onRetireDurableItem = async (item: DurableItem) => {
+    if (!item.id) return;
+
+    try {
+      const retired = await retireDurableItem(baseUrl, item.id, { notes: item.notes ?? null });
+      setSelectedDurableItem(retired);
+      setError(null);
+      await loadData();
+    } catch (e) {
+      setError(String(e));
+    }
   };
 
   useEffect(() => {
@@ -344,6 +516,10 @@ export function App() {
     clearEntryError(entry.entryId);
   };
 
+  const selectedDurableDetail = selectedDurableItem?.id
+    ? durableItems.find((item) => item.id === selectedDurableItem.id) ?? selectedDurableItem
+    : selectedDurableItem;
+
   return (
     <main style={{ fontFamily: 'system-ui', padding: 16 }}>
       <h1>PHOODAB Pantry MVP</h1>
@@ -387,6 +563,138 @@ export function App() {
         <input placeholder="Storage slot ID (optional)" value={storageSlotId} onChange={(e) => setStorageSlotId(e.target.value)} />
         <button type="submit">Add Entry</button>
       </form>
+
+      <h2>Durable Items</h2>
+      <form onSubmit={onSaveDurableItem}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'end' }}>
+          <input
+            aria-label="Durable item name"
+            placeholder="Durable item name"
+            value={durableForm.displayName}
+            onChange={(e) => setDurableFormField('displayName', e.target.value)}
+          />
+          <input
+            aria-label="Durable item type"
+            placeholder="Category or type"
+            value={durableForm.itemType}
+            onChange={(e) => setDurableFormField('itemType', e.target.value)}
+          />
+          <select
+            aria-label="Durable item status"
+            value={durableForm.status}
+            onChange={(e) => setDurableFormField('status', e.target.value as DurableItemStatus)}
+          >
+            {durableStatuses.map((status) => (
+              <option key={status} value={status}>
+                {status}
+              </option>
+            ))}
+          </select>
+          <input
+            aria-label="Durable item location"
+            placeholder="Location"
+            value={durableForm.currentLocation}
+            onChange={(e) => setDurableFormField('currentLocation', e.target.value)}
+          />
+          <input
+            aria-label="Durable item brand"
+            placeholder="Brand / manufacturer"
+            value={durableForm.brandManufacturer}
+            onChange={(e) => setDurableFormField('brandManufacturer', e.target.value)}
+          />
+          <input
+            aria-label="Durable item model"
+            placeholder="Model"
+            value={durableForm.model}
+            onChange={(e) => setDurableFormField('model', e.target.value)}
+          />
+          <input
+            aria-label="Durable item serial number"
+            placeholder="Serial number"
+            value={durableForm.serialNumber}
+            onChange={(e) => setDurableFormField('serialNumber', e.target.value)}
+          />
+          <input
+            aria-label="Durable item purchase date"
+            type="date"
+            value={durableForm.purchaseDate}
+            onChange={(e) => setDurableFormField('purchaseDate', e.target.value)}
+          />
+          <input
+            aria-label="Durable item purchase value"
+            placeholder="Purchase value"
+            type="number"
+            step="any"
+            value={durableForm.purchaseValue}
+            onChange={(e) => setDurableFormField('purchaseValue', e.target.value)}
+          />
+          <input
+            aria-label="Durable item warranty end"
+            type="date"
+            value={durableForm.warrantyEndsOn}
+            onChange={(e) => setDurableFormField('warrantyEndsOn', e.target.value)}
+          />
+          <input
+            aria-label="Durable item storage slot"
+            placeholder="Storage slot ID (optional)"
+            value={durableForm.storageSlotId}
+            onChange={(e) => setDurableFormField('storageSlotId', e.target.value)}
+          />
+          <input
+            aria-label="Durable item description"
+            placeholder="Description"
+            value={durableForm.description}
+            onChange={(e) => setDurableFormField('description', e.target.value)}
+          />
+          <input
+            aria-label="Durable item notes"
+            placeholder="Notes"
+            value={durableForm.notes}
+            onChange={(e) => setDurableFormField('notes', e.target.value)}
+          />
+          <button type="submit">{editingDurableItemId ? 'Save Durable Item' : 'Create Durable Item'}</button>
+          {editingDurableItemId && <button type="button" onClick={onCancelDurableEdit}>Cancel Durable Edit</button>}
+        </div>
+      </form>
+      {!isLoading && !error && durableItems.length === 0 && <p>No durable items.</p>}
+      {!isLoading && !error && durableItems.length > 0 && (
+        <ul>
+          {durableItems.map((item) => {
+            const name = getDurableDisplayName(item);
+            const location = item.currentLocation || item.storageSlotId || 'No location set';
+            return (
+              <li key={item.id ?? `${name}-${item.itemDefinitionId ?? ''}`} style={{ marginBottom: 12 }}>
+                <strong>{name}</strong>: {item.itemType || 'Uncategorized'} [{item.status}]
+                <div>
+                  Location: {location} | {getWarrantyIndicator(item)}
+                </div>
+                <button aria-label={`Open durable item ${name}`} onClick={() => onOpenDurableItem(item)}>Open Details</button>
+                <button aria-label={`Edit durable item ${name}`} onClick={() => onEditDurableItem(item)}>Edit</button>
+                {item.status !== 'Retired' && <button aria-label={`Retire durable item ${name}`} onClick={() => onRetireDurableItem(item)}>Retire</button>}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      <h3>Durable Item Detail</h3>
+      {durableDetailLoading && <p>Loading durable item detail...</p>}
+      {!durableDetailLoading && !selectedDurableDetail && <p>Open a durable item to view details.</p>}
+      {!durableDetailLoading && selectedDurableDetail && (
+        <section aria-label={`Durable item detail for ${getDurableDisplayName(selectedDurableDetail)}`}>
+          <strong>{getDurableDisplayName(selectedDurableDetail)}</strong>
+          <div>Type: {selectedDurableDetail.itemType || 'Uncategorized'}</div>
+          <div>Status: {selectedDurableDetail.status}</div>
+          <div>Location: {selectedDurableDetail.currentLocation || selectedDurableDetail.storageSlotId || 'No location set'}</div>
+          <div>Brand / manufacturer: {selectedDurableDetail.brandManufacturer || 'Not recorded'}</div>
+          <div>Model: {selectedDurableDetail.model || 'Not recorded'}</div>
+          <div>Serial number: {selectedDurableDetail.serialNumber || 'Not recorded'}</div>
+          <div>Purchase date: {selectedDurableDetail.purchaseDate || 'Not recorded'}</div>
+          <div>Purchase value: {selectedDurableDetail.purchaseValue ?? 'Not recorded'}</div>
+          <div>{getWarrantyIndicator(selectedDurableDetail)}</div>
+          <div>Description: {selectedDurableDetail.description || 'Not recorded'}</div>
+          <div>Notes: {selectedDurableDetail.notes || 'Not recorded'}</div>
+        </section>
+      )}
 
       <h2>Inventory Summary</h2>
       {isLoading && <p>Loading pantry data...</p>}
