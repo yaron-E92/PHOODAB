@@ -1,6 +1,7 @@
 using System.Globalization;
-using System.Net.Http.Json;
 using System.Text.Json;
+using Phoodab.Application;
+using Phoodab.Domain;
 
 namespace Phoodab.Mobile;
 
@@ -10,8 +11,9 @@ public sealed class MainPage : ContentPage
     private const string TargetAmountHelp = "Amount to keep stocked before replenishment is suggested.";
     private const string ExpiryWarningDaysHelp = "Treat entries expiring within this many days as warning items.";
 
-    private readonly HttpClient _httpClient;
-    private readonly Entry _baseUrlEntry = new() { Text = "http://localhost:5199", Placeholder = "API base URL" };
+    private readonly IInventoryMvpStore _store;
+    private readonly ReplenishmentSuggestionService _suggestionService;
+    private readonly IUtcDateProvider _utcDateProvider;
     private readonly Label _healthLabel = new() { Text = "Health: loading" };
     private readonly Label _versionLabel = new() { Text = "Version: loading" };
     private readonly Label _statusLabel = new() { TextColor = Colors.DarkRed };
@@ -36,9 +38,14 @@ public sealed class MainPage : ContentPage
 
     private bool _hasLoaded;
 
-    public MainPage(HttpClient httpClient)
+    public MainPage(
+        IInventoryMvpStore store,
+        ReplenishmentSuggestionService suggestionService,
+        IUtcDateProvider utcDateProvider)
     {
-        _httpClient = httpClient;
+        _store = store;
+        _suggestionService = suggestionService;
+        _utcDateProvider = utcDateProvider;
         Title = "PHOODAB Pantry";
         BackgroundColor = Colors.White;
 
@@ -60,8 +67,6 @@ public sealed class MainPage : ContentPage
         await LoadDataAsync();
     }
 
-    private string BaseUrl => (_baseUrlEntry.Text ?? string.Empty).Trim().TrimEnd('/');
-
     private void BuildShell()
     {
         _content.Children.Clear();
@@ -73,7 +78,6 @@ public sealed class MainPage : ContentPage
             TextColor = Colors.Black
         });
 
-        _content.Children.Add(_baseUrlEntry);
         _content.Children.Add(Button("Refresh", async () => await LoadDataAsync()));
         _content.Children.Add(_healthLabel);
         _content.Children.Add(_versionLabel);
@@ -101,25 +105,21 @@ public sealed class MainPage : ContentPage
 
         try
         {
-            var healthTask = GetAsync<HealthResponse>("/health");
-            var versionTask = GetAsync<VersionResponse>("/version");
-            var summaryTask = GetAsync<List<InventorySummaryItem>>("/api/inventory/summary");
-            var entriesTask = GetAsync<List<ConsumableEntry>>("/api/consumable-entries");
-            var expiringTask = GetAsync<List<ConsumableEntry>>("/api/consumable-entries/expiring");
-            var suggestionsTask = GetAsync<List<ReplenishmentSuggestion>>("/api/replenishment/suggestions");
-            var shoppingTask = GetAsync<List<ShoppingListItem>>("/api/shopping-list-items");
-            var rulesTask = GetAsync<List<ReplenishmentRule>>("/api/replenishment/rules");
+            await Task.Yield();
 
-            await Task.WhenAll(healthTask, versionTask, summaryTask, entriesTask, expiringTask, suggestionsTask, shoppingTask, rulesTask);
+            var todayUtc = _utcDateProvider.TodayUtc;
+            var entries = _store.GetConsumableEntryReadModels(todayUtc)
+                .Select(ToMobileEntry)
+                .ToList();
 
-            _healthLabel.Text = $"Health: {(await healthTask).Status}";
-            _versionLabel.Text = $"Version: {(await versionTask).Version}";
-            Replace(_summary, await summaryTask);
-            Replace(_consumableEntries, await entriesTask);
-            Replace(_expiringEntries, await expiringTask);
-            Replace(_suggestions, await suggestionsTask);
-            Replace(_shoppingListItems, await shoppingTask);
-            Replace(_rules, await rulesTask);
+            _healthLabel.Text = "Health: local app services";
+            _versionLabel.Text = $"Version: {typeof(App).Assembly.GetName().Version?.ToString() ?? "0.0.0"}";
+            Replace(_summary, ProjectList<InventorySummaryItem>(_store.GetSummary()));
+            Replace(_consumableEntries, entries);
+            Replace(_expiringEntries, _store.GetExpiringConsumableEntries(todayUtc).Select(ToMobileEntry).ToList());
+            Replace(_suggestions, _suggestionService.GetSuggestions(_store.GetRules(), _store.GetConsumableEntries()).Select(ToMobileSuggestion).ToList());
+            Replace(_shoppingListItems, ProjectList<ShoppingListItem>(_store.GetShoppingListItems()));
+            Replace(_rules, _store.GetRules().Select(ToMobileRule).ToList());
             SetStatus(string.Empty, isError: false);
         }
         catch (Exception ex)
@@ -427,21 +427,19 @@ public sealed class MainPage : ContentPage
 
         try
         {
-            var created = await PostAsync<ItemDefinition>("/api/item-definitions", new
-            {
+            var created = _store.CreateItemDefinition(
                 name,
-                kind = 1,
+                ItemKind.Consumable,
                 desiredAmount,
-                desiredUnit = BlankToNull(_desiredUnitEntry.Text)
-            });
+                BlankToNull(_desiredUnitEntry.Text));
 
-            _createdItems.RemoveAll(item => item.Id == created.Id);
-            _createdItems.Insert(0, new ItemOption(created.Id, created.Name));
+            _createdItems.RemoveAll(item => item.Id == created.Id.ToString());
+            _createdItems.Insert(0, new ItemOption(created.Id.ToString(), created.Name));
             _itemNameEntry.Text = string.Empty;
             _desiredAmountEntry.Text = string.Empty;
             _desiredUnitEntry.Text = string.Empty;
             await LoadDataAsync();
-            SelectItem(created.Id);
+            SelectItem(created.Id.ToString());
         }
         catch (Exception ex)
         {
@@ -470,16 +468,26 @@ public sealed class MainPage : ContentPage
             return;
         }
 
+        if (!Guid.TryParse(option.Id, out var itemDefinitionId))
+        {
+            SetStatus("Selected item is invalid.", isError: true);
+            return;
+        }
+
+        if (!TryParseOptionalDate(_expiryDateEntry.Text, "Expiry date", out var expiresOn) ||
+            !TryParseOptionalGuid(_storageSlotEntry.Text, "Storage slot ID", out var storageSlotId))
+        {
+            return;
+        }
+
         try
         {
-            await PostAsync("/api/consumable-entries", new
+            var created = _store.AddConsumableEntry(itemDefinitionId, quantity.Value, unit, expiresOn, storageSlotId);
+            if (created is null)
             {
-                itemDefinitionId = option.Id,
-                quantity,
-                unit,
-                expiresOn = BlankToNull(_expiryDateEntry.Text),
-                storageSlotId = BlankToNull(_storageSlotEntry.Text)
-            });
+                SetStatus("Selected item was not found.", isError: true);
+                return;
+            }
 
             _quantityEntry.Text = string.Empty;
             _unitEntry.Text = string.Empty;
@@ -508,7 +516,13 @@ public sealed class MainPage : ContentPage
             return;
         }
 
-        await PatchEntryAsync(entry.EntryId, quantity.Value, unit, BlankToNull(expiryText), BlankToNull(storageSlotText));
+        if (!TryParseOptionalDate(expiryText, "Expiry date", out var expiresOn) ||
+            !TryParseOptionalGuid(storageSlotText, "Storage slot ID", out var storageSlotId))
+        {
+            return;
+        }
+
+        await PatchEntryAsync(entry.EntryId, quantity.Value, unit, expiresOn, storageSlotId);
     }
 
     private async Task AdjustStockAsync(ConsumableEntry entry, string? amountText, string? unitText, bool isAdd)
@@ -539,7 +553,7 @@ public sealed class MainPage : ContentPage
             return;
         }
 
-        await PatchEntryAsync(entry.EntryId, nextQuantity, entry.Unit, entry.ExpiresOn, entry.StorageSlotId);
+        await PatchEntryAsync(entry.EntryId, nextQuantity, entry.Unit, ParseStoredDate(entry.ExpiresOn), ParseStoredGuid(entry.StorageSlotId));
     }
 
     private async Task MarkLotDepletedAsync(ConsumableEntry entry)
@@ -550,20 +564,26 @@ public sealed class MainPage : ContentPage
             return;
         }
 
-        await PatchEntryAsync(entry.EntryId, 0, entry.Unit, entry.ExpiresOn, entry.StorageSlotId);
+        await PatchEntryAsync(entry.EntryId, 0, entry.Unit, ParseStoredDate(entry.ExpiresOn), ParseStoredGuid(entry.StorageSlotId));
     }
 
-    private async Task PatchEntryAsync(string entryId, decimal quantity, string unit, string? expiresOn, string? storageSlotId)
+    private async Task PatchEntryAsync(string entryId, decimal quantity, string unit, DateOnly? expiresOn, Guid? storageSlotId)
     {
         try
         {
-            await PatchAsync<ConsumableEntry>($"/api/consumable-entries/{entryId}", new
+            if (!Guid.TryParse(entryId, out var parsedEntryId))
             {
-                quantity,
-                unit,
-                expiresOn,
-                storageSlotId
-            });
+                SetStatus("Consumable entry ID is invalid.", isError: true);
+                return;
+            }
+
+            var updated = _store.UpdateConsumableEntry(parsedEntryId, quantity, unit, expiresOn, storageSlotId, _utcDateProvider.TodayUtc);
+            if (updated is null)
+            {
+                SetStatus("Consumable entry was not found.", isError: true);
+                return;
+            }
+
             await LoadDataAsync();
         }
         catch (Exception ex)
@@ -576,15 +596,19 @@ public sealed class MainPage : ContentPage
     {
         try
         {
-            await PostAsync<ShoppingListItem>("/api/shopping-list-items/from-suggestion", new
+            if (!Guid.TryParse(suggestion.ItemDefinitionId, out var itemDefinitionId))
             {
-                itemDefinitionId = suggestion.ItemDefinitionId,
-                quantity = suggestion.SuggestedPurchaseAmount,
-                unit = suggestion.Unit,
-                deficitAmount = suggestion.DeficitAmount,
-                expiringSoonAmount = suggestion.ExpiringSoonAmount,
-                suggestedPurchaseAmount = suggestion.SuggestedPurchaseAmount
-            });
+                SetStatus("Suggestion item ID is invalid.", isError: true);
+                return;
+            }
+
+            _store.CreateOrUpdateShoppingListItemFromSuggestion(
+                itemDefinitionId,
+                suggestion.SuggestedPurchaseAmount,
+                suggestion.Unit,
+                suggestion.DeficitAmount,
+                suggestion.ExpiringSoonAmount,
+                suggestion.SuggestedPurchaseAmount);
             await LoadDataAsync();
         }
         catch (Exception ex)
@@ -597,7 +621,19 @@ public sealed class MainPage : ContentPage
     {
         try
         {
-            await PatchAsync<ShoppingListItem>($"/api/shopping-list-items/{shoppingListItemId}", new { status });
+            if (!Guid.TryParse(shoppingListItemId, out var parsedShoppingListItemId))
+            {
+                SetStatus("Shopping list item ID is invalid.", isError: true);
+                return;
+            }
+
+            var updated = _store.UpdateShoppingListItemStatus(parsedShoppingListItemId, null, null, status);
+            if (updated is null)
+            {
+                SetStatus("Shopping list item was not found.", isError: true);
+                return;
+            }
+
             await LoadDataAsync();
         }
         catch (Exception ex)
@@ -610,8 +646,18 @@ public sealed class MainPage : ContentPage
     {
         try
         {
-            using var response = await _httpClient.DeleteAsync($"{BaseUrl}/api/shopping-list-items/{shoppingListItemId}");
-            response.EnsureSuccessStatusCode();
+            if (!Guid.TryParse(shoppingListItemId, out var parsedShoppingListItemId))
+            {
+                SetStatus("Shopping list item ID is invalid.", isError: true);
+                return;
+            }
+
+            if (!_store.DeleteShoppingListItem(parsedShoppingListItemId))
+            {
+                SetStatus("Shopping list item was not found.", isError: true);
+                return;
+            }
+
             await LoadDataAsync();
         }
         catch (Exception ex)
@@ -636,49 +682,25 @@ public sealed class MainPage : ContentPage
 
         try
         {
-            await PatchAsync<ReplenishmentRule>($"/api/replenishment/rules/{rule.Id}", new
+            if (!Guid.TryParse(rule.Id, out var parsedRuleId))
             {
-                desiredAmount,
-                desiredUnit = (desiredUnitText ?? string.Empty).Trim(),
-                expiryWarningDays,
-                isDisabled
-            });
+                SetStatus("Replenishment rule ID is invalid.", isError: true);
+                return;
+            }
+
+            var updated = _store.UpdateRule(parsedRuleId, desiredAmount, (desiredUnitText ?? string.Empty).Trim(), isDisabled, expiryWarningDays);
+            if (updated is null)
+            {
+                SetStatus("Replenishment rule was not found.", isError: true);
+                return;
+            }
+
             await LoadDataAsync();
         }
         catch (Exception ex)
         {
             SetStatus($"Update rule failed: {ex.Message}", isError: true);
         }
-    }
-
-    private async Task<T> GetAsync<T>(string path)
-    {
-        using var response = await _httpClient.GetAsync($"{BaseUrl}{path}");
-        response.EnsureSuccessStatusCode();
-        var value = await response.Content.ReadFromJsonAsync<T>(JsonOptions);
-        return value ?? throw new InvalidOperationException($"Empty response for {path}.");
-    }
-
-    private async Task PostAsync(string path, object payload)
-    {
-        using var response = await _httpClient.PostAsJsonAsync($"{BaseUrl}{path}", payload, JsonOptions);
-        response.EnsureSuccessStatusCode();
-    }
-
-    private async Task<T> PostAsync<T>(string path, object payload)
-    {
-        using var response = await _httpClient.PostAsJsonAsync($"{BaseUrl}{path}", payload, JsonOptions);
-        response.EnsureSuccessStatusCode();
-        var value = await response.Content.ReadFromJsonAsync<T>(JsonOptions);
-        return value ?? throw new InvalidOperationException($"Empty response for {path}.");
-    }
-
-    private async Task<T> PatchAsync<T>(string path, object payload)
-    {
-        using var response = await _httpClient.PatchAsJsonAsync($"{BaseUrl}{path}", payload, JsonOptions);
-        response.EnsureSuccessStatusCode();
-        var value = await response.Content.ReadFromJsonAsync<T>(JsonOptions);
-        return value ?? throw new InvalidOperationException($"Empty response for {path}.");
     }
 
     private void RefreshItemPicker()
@@ -756,6 +778,58 @@ public sealed class MainPage : ContentPage
     {
         var trimmed = (value ?? string.Empty).Trim();
         return string.IsNullOrWhiteSpace(trimmed) ? null : trimmed;
+    }
+
+    private bool TryParseOptionalDate(string? value, string fieldName, out DateOnly? date)
+    {
+        var trimmed = (value ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            date = null;
+            return true;
+        }
+
+        if (DateOnly.TryParseExact(trimmed, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
+        {
+            date = parsed;
+            return true;
+        }
+
+        date = null;
+        SetStatus($"{fieldName} must use YYYY-MM-DD.", isError: true);
+        return false;
+    }
+
+    private bool TryParseOptionalGuid(string? value, string fieldName, out Guid? id)
+    {
+        var trimmed = (value ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            id = null;
+            return true;
+        }
+
+        if (Guid.TryParse(trimmed, out var parsed))
+        {
+            id = parsed;
+            return true;
+        }
+
+        id = null;
+        SetStatus($"{fieldName} must be a valid GUID.", isError: true);
+        return false;
+    }
+
+    private static DateOnly? ParseStoredDate(string? value)
+    {
+        return DateOnly.TryParseExact(value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed)
+            ? parsed
+            : null;
+    }
+
+    private static Guid? ParseStoredGuid(string? value)
+    {
+        return Guid.TryParse(value, out var parsed) ? parsed : null;
     }
 
     private void SetStatus(string message, bool isError)
@@ -860,6 +934,60 @@ public sealed class MainPage : ContentPage
         return $"Breakdown: current {suggestion.UsableCurrentQuantity.ToString(CultureInfo.InvariantCulture)} {suggestion.Unit}; required {suggestion.RequiredAmount.ToString(CultureInfo.InvariantCulture)} {suggestion.Unit}; suggested {suggestion.SuggestedPurchaseAmount.ToString(CultureInfo.InvariantCulture)} {suggestion.Unit}; rule source replenishment target; desired {suggestion.DesiredQuantity.ToString(CultureInfo.InvariantCulture)} {suggestion.Unit}; usable {suggestion.UsableCurrentQuantity.ToString(CultureInfo.InvariantCulture)} {suggestion.Unit}; deficit {suggestion.DeficitAmount.ToString(CultureInfo.InvariantCulture)} {suggestion.Unit}; expiring soon {suggestion.ExpiringSoonAmount.ToString(CultureInfo.InvariantCulture)} {suggestion.Unit}";
     }
 
+    private static List<T> ProjectList<T>(IEnumerable<object> source)
+    {
+        return source.Select(Project<T>).ToList();
+    }
+
+    private static T Project<T>(object source)
+    {
+        var json = JsonSerializer.Serialize(source, JsonOptions);
+        return JsonSerializer.Deserialize<T>(json, JsonOptions)
+            ?? throw new InvalidOperationException($"Could not project {typeof(T).Name}.");
+    }
+
+    private static ConsumableEntry ToMobileEntry(ConsumableEntryReadModel entry)
+    {
+        return new ConsumableEntry(
+            entry.EntryId.ToString(),
+            entry.ItemDefinitionId.ToString(),
+            entry.ItemName,
+            entry.Quantity,
+            entry.Unit,
+            entry.ExpiresOn?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            entry.ExpiresInDays,
+            entry.ExpiryStatus,
+            entry.StorageSlotId?.ToString());
+    }
+
+    private static ReplenishmentSuggestion ToMobileSuggestion(ReplenishmentSuggestionReadModel suggestion)
+    {
+        return new ReplenishmentSuggestion(
+            suggestion.ItemDefinitionId.ToString(),
+            suggestion.ItemName,
+            suggestion.CurrentQuantity,
+            suggestion.UsableCurrentQuantity,
+            suggestion.DesiredQuantity,
+            suggestion.DeficitAmount,
+            suggestion.ExpiringSoonAmount,
+            suggestion.SuggestedPurchaseAmount,
+            suggestion.RequiredAmount,
+            suggestion.Unit,
+            suggestion.Entries.Select(ToMobileEntry).ToList());
+    }
+
+    private static ReplenishmentRule ToMobileRule(Phoodab.Domain.ReplenishmentRule rule)
+    {
+        return new ReplenishmentRule(
+            rule.Id.ToString(),
+            rule.ItemDefinitionId.ToString(),
+            string.Empty,
+            rule.TargetAmount.Value,
+            rule.Unit.Value,
+            rule.ExpiryWarningDays,
+            rule.IsDisabled);
+    }
+
     private static View LabeledField(string labelText, View field, string description, string? help = null)
     {
         var label = new Label { Text = labelText };
@@ -900,9 +1028,6 @@ public sealed class MainPage : ContentPage
         public override string ToString() => Label;
     }
 
-    private sealed record HealthResponse(string Status);
-    private sealed record VersionResponse(string Version);
-    private sealed record ItemDefinition(string Id, string Name, string Kind);
     private sealed record InventorySummaryItem(string ItemDefinitionId, string ItemName, decimal? TotalQuantity, string? Unit, int EntryCount, bool HasMixedUnits, string? MixedUnitWarning);
     private sealed record ConsumableEntry(string EntryId, string ItemDefinitionId, string ItemName, decimal Quantity, string Unit, string? ExpiresOn, int? ExpiresInDays, string ExpiryStatus, string? StorageSlotId);
     private sealed record ReplenishmentSuggestion(string ItemDefinitionId, string ItemName, decimal CurrentQuantity, decimal UsableCurrentQuantity, decimal DesiredQuantity, decimal DeficitAmount, decimal ExpiringSoonAmount, decimal SuggestedPurchaseAmount, decimal RequiredAmount, string Unit, List<ConsumableEntry> Entries);

@@ -15,4 +15,8 @@
     <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
     <WindowsPackageType>None</WindowsPackageType>
   </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\backend\src\Phoodab.Application\Phoodab.Application.csproj" />
+    <ProjectReference Include="..\..\backend\src\Phoodab.Domain\Phoodab.Domain.csproj" />
+  </ItemGroup>
 </Project>
