@@ -56,6 +56,13 @@ vi.mock('react-dom/client', async () => {
 });
 
 describe('pantry mvp page', () => {
+  const goToPage = async (container: HTMLElement, label: string) => {
+    await act(async () => {
+      Array.from(container.querySelectorAll('nav button')).find((button) => button.textContent === label)!.click();
+      await Promise.resolve();
+    });
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
     document.body.innerHTML = '<div id="root"></div>';
@@ -147,11 +154,126 @@ describe('pantry mvp page', () => {
       root.render(<App />);
     });
 
+    expect(container.textContent).toContain('Everything with a replenishment rule has enough usable stock.');
+    expect(container.textContent).toContain('No expiring or expired lots need attention.');
+    expect(container.textContent).toContain('No replenishment needed right now.');
+
+    await goToPage(container, 'Inventory');
     expect(container.textContent).toContain('No inventory yet.');
-    expect(container.textContent).toContain('No durable items.');
-    expect(container.textContent).toContain('Open a durable item to view details.');
     expect(container.textContent).toContain('No expiring entries.');
     expect(container.textContent).toContain('No replenishment needed.');
+
+    await goToPage(container, 'Durable Items');
+    expect(container.textContent).toContain('No durable items.');
+    expect(container.textContent).toContain('Open a durable item to view details.');
+  });
+
+  it('renders the product shell, dashboard cards, and section navigation', async () => {
+    getInventorySummaryMock.mockResolvedValue([
+      {
+        itemDefinitionId: 'item-1',
+        itemName: 'Milk',
+        totalQuantity: 1,
+        unit: 'liter',
+        entryCount: 1,
+        hasMixedUnits: false,
+        mixedUnitWarning: null
+      }
+    ]);
+    getConsumableEntriesMock.mockResolvedValue([
+      {
+        entryId: 'entry-1',
+        itemDefinitionId: 'item-1',
+        itemName: 'Milk',
+        quantity: 1,
+        unit: 'liter',
+        expiresOn: '2026-06-10',
+        expiresInDays: 3,
+        expiryStatus: 'Soon',
+        storageSlotId: 'fridge-top'
+      }
+    ]);
+    getExpiringConsumableEntriesMock.mockResolvedValue([
+      {
+        entryId: 'entry-1',
+        itemDefinitionId: 'item-1',
+        itemName: 'Milk',
+        quantity: 1,
+        unit: 'liter',
+        expiresOn: '2026-06-10',
+        expiresInDays: 3,
+        expiryStatus: 'Soon',
+        storageSlotId: 'fridge-top'
+      }
+    ]);
+    getReplenishmentSuggestionsMock.mockResolvedValue([
+      {
+        itemDefinitionId: 'item-1',
+        itemName: 'Milk',
+        requiredAmount: 5,
+        desiredQuantity: 10,
+        currentQuantity: 1,
+        usableCurrentQuantity: 1,
+        deficitAmount: 4,
+        expiringSoonAmount: 1,
+        suggestedPurchaseAmount: 5,
+        unit: 'liter',
+        entries: []
+      }
+    ]);
+    getShoppingListItemsMock.mockResolvedValue([
+      {
+        id: 'shopping-1',
+        itemDefinitionId: 'item-1',
+        itemName: 'Milk',
+        quantity: 5,
+        unit: 'liter',
+        isResolved: false,
+        isPurchased: false,
+        status: 'InCart',
+        stockUpdateNeeded: false,
+        nextInventoryAction: null,
+        sourceDeficitAmount: 4,
+        sourceExpiringSoonAmount: 1,
+        sourceSuggestedPurchaseAmount: 5
+      }
+    ]);
+
+    const { App } = await import('./main');
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<App />);
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector('nav')?.textContent).toContain('Dashboard');
+    expect(container.querySelector('nav')?.textContent).toContain('Inventory');
+    expect(container.querySelector('nav')?.textContent).toContain('Shopping List');
+    expect(container.querySelector('nav')?.textContent).toContain('Locations');
+    expect(container.querySelector('nav')?.textContent).toContain('Durable Items');
+    expect(container.textContent).toContain('What should I care about right now?');
+    expect(container.textContent).toContain('Low-stock consumables');
+    expect(container.textContent).toContain('Milk needs 5 liter');
+    expect(container.textContent).toContain('Expiring items');
+    expect(container.textContent).toContain('Milk - 1 liter - Soon');
+    expect(container.textContent).toContain('Recently updated inventory');
+    expect(container.textContent).toContain('Milk lot entry-1');
+    expect(container.textContent).toContain('Replenishment suggestions');
+    expect(container.textContent).toContain('Buy 5 liter');
+    expect(container.textContent).toContain('Shopping actions');
+    expect(container.textContent).toContain('Milk: 5 liter [In cart / buying]');
+
+    await act(async () => {
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Locations')!.click();
+    });
+
+    expect(container.textContent).toContain('Locations');
+    expect(container.textContent).toContain('fridge-top');
+    expect(container.textContent).toContain('Milk lot entry-1');
   });
 
   it('creates durable items from the durable item form', async () => {
@@ -165,6 +287,7 @@ describe('pantry mvp page', () => {
       root.render(<App />);
       await Promise.resolve();
     });
+    await goToPage(container, 'Durable Items');
 
     const nameInput = container.querySelector('input[aria-label="Durable item name"]') as HTMLInputElement;
     const typeInput = container.querySelector('input[aria-label="Durable item type"]') as HTMLInputElement;
@@ -235,6 +358,7 @@ describe('pantry mvp page', () => {
       root.render(<App />);
       await Promise.resolve();
     });
+    await goToPage(container, 'Durable Items');
 
     expect(container.textContent).toContain('Laptop: Electronics [Active]');
     expect(container.textContent).toContain('Location: Office | Warranty through 2027-01-01');
@@ -345,6 +469,7 @@ describe('pantry mvp page', () => {
       root.render(<App />);
       await Promise.resolve();
     });
+    await goToPage(container, 'Inventory');
 
     expect(container.textContent).toContain('Milk - 1 liter - Soon');
     expect(container.textContent).toContain('Milk: 5 liter (2 about to expire)');
@@ -387,6 +512,7 @@ describe('pantry mvp page', () => {
       root.render(<App />);
       await Promise.resolve();
     });
+    await goToPage(container, 'Inventory');
 
     await act(async () => {
       Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Add to Shopping List')!.click();
@@ -462,6 +588,7 @@ describe('pantry mvp page', () => {
       root.render(<App />);
       await Promise.resolve();
     });
+    await goToPage(container, 'Shopping List');
 
     expect(container.textContent).toContain('Milk: 5 liter [Added to shopping list]');
     expect(container.textContent).toContain('Eggs: 1 dozen [In cart / buying]');
@@ -523,6 +650,7 @@ describe('pantry mvp page', () => {
       root.render(<App />);
       await Promise.resolve();
     });
+    await goToPage(container, 'Inventory');
 
     expect(container.textContent).toContain('Target amount');
     expect(container.textContent).toContain('Expiry warning days');
@@ -588,6 +716,7 @@ describe('pantry mvp page', () => {
       root.render(<App />);
       await Promise.resolve();
     });
+    await goToPage(container, 'Inventory');
 
     const inputs = Array.from(container.querySelectorAll('input'));
     const quantityInput = inputs.find((input) => input.getAttribute('aria-label') === 'Entry quantity for Milk')!;
@@ -640,6 +769,7 @@ describe('pantry mvp page', () => {
       root.render(<App />);
       await Promise.resolve();
     });
+    await goToPage(container, 'Inventory');
 
     expect(container.textContent).toContain('Lot entry-1');
     expect(container.textContent).toContain('Expiry: 2026-06-10 (Safe)');
@@ -734,6 +864,7 @@ describe('pantry mvp page', () => {
       root.render(<App />);
       await Promise.resolve();
     });
+    await goToPage(container, 'Inventory');
 
     const quantityInput = container.querySelector('input[aria-label="Entry quantity for Milk"]') as HTMLInputElement;
     await act(async () => {
@@ -790,6 +921,7 @@ describe('pantry mvp page', () => {
       root.render(<App />);
       await Promise.resolve();
     });
+    await goToPage(container, 'Inventory');
 
     expect(container.textContent).toContain('Rice: mixed units (2 entries)');
     expect(container.textContent).toContain('Mixed units cannot be totaled safely.');
