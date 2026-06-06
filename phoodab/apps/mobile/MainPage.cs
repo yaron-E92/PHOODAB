@@ -25,11 +25,27 @@ public sealed class MainPage : ContentPage
     private readonly Entry _unitEntry = new() { Placeholder = "Unit" };
     private readonly Entry _expiryDateEntry = new() { Placeholder = "Expiry date YYYY-MM-DD (optional)" };
     private readonly Entry _storageSlotEntry = new() { Placeholder = "Storage slot ID (optional)" };
+    private readonly Entry _durableNameEntry = new() { Placeholder = "Durable item name" };
+    private readonly Entry _durableTypeEntry = new() { Placeholder = "Category or type" };
+    private readonly Picker _durableStatusPicker = new() { Title = "Status" };
+    private readonly Entry _durableLocationEntry = new() { Placeholder = "Location" };
+    private readonly Entry _durableBrandEntry = new() { Placeholder = "Brand / manufacturer" };
+    private readonly Entry _durableModelEntry = new() { Placeholder = "Model" };
+    private readonly Entry _durableSerialEntry = new() { Placeholder = "Serial number" };
+    private readonly Entry _durablePurchaseDateEntry = new() { Placeholder = "Purchase date YYYY-MM-DD (optional)" };
+    private readonly Entry _durablePurchaseValueEntry = new() { Placeholder = "Purchase value (optional)", Keyboard = Keyboard.Numeric };
+    private readonly Entry _durableWarrantyEntry = new() { Placeholder = "Warranty end YYYY-MM-DD (optional)" };
+    private readonly Entry _durableDescriptionEntry = new() { Placeholder = "Description" };
+    private readonly Entry _durableNotesEntry = new() { Placeholder = "Notes" };
+    private readonly Entry _durableStorageSlotEntry = new() { Placeholder = "Storage slot ID (optional)" };
+    private readonly Button _durableSaveButton = new() { Text = "Create Durable Item" };
+    private readonly Button _durableCancelButton = new() { Text = "Cancel Durable Edit", IsVisible = false };
     private readonly VerticalStackLayout _content = new() { Spacing = 16, Padding = 16 };
     private readonly VerticalStackLayout _dataContent = new() { Spacing = 16 };
 
     private readonly List<ItemOption> _createdItems = [];
     private readonly List<InventorySummaryItem> _summary = [];
+    private readonly List<DurableItem> _durableItems = [];
     private readonly List<ConsumableEntry> _consumableEntries = [];
     private readonly List<ConsumableEntry> _expiringEntries = [];
     private readonly List<ReplenishmentSuggestion> _suggestions = [];
@@ -37,6 +53,8 @@ public sealed class MainPage : ContentPage
     private readonly List<ReplenishmentRule> _rules = [];
 
     private bool _hasLoaded;
+    private string? _editingDurableEntryId;
+    private string? _selectedDurableEntryId;
 
     public MainPage(
         IInventoryMvpStore store,
@@ -48,6 +66,10 @@ public sealed class MainPage : ContentPage
         _utcDateProvider = utcDateProvider;
         Title = "PHOODAB Pantry";
         BackgroundColor = Colors.White;
+        _durableStatusPicker.ItemsSource = Enum.GetNames<DurableItemStatus>().ToList();
+        _durableStatusPicker.SelectedItem = DurableItemStatus.Active.ToString();
+        _durableSaveButton.Clicked += async (_, _) => await SaveDurableItemAsync();
+        _durableCancelButton.Clicked += (_, _) => ClearDurableForm();
 
         Content = new ScrollView { Content = _content };
         BuildShell();
@@ -85,12 +107,14 @@ public sealed class MainPage : ContentPage
 
         AddCreateItemSection();
         AddEntrySection();
+        AddDurableFormSection();
         _content.Children.Add(_dataContent);
     }
 
     private void RebuildDataSections()
     {
         _dataContent.Children.Clear();
+        AddDurableItemsSection();
         AddInventorySummarySection();
         AddConsumableAuditSection();
         AddExpiringSection();
@@ -110,6 +134,7 @@ public sealed class MainPage : ContentPage
             _healthLabel.Text = "Health: local app services";
             _versionLabel.Text = $"Version: {typeof(App).Assembly.GetName().Version?.ToString() ?? "0.0.0"}";
             Replace(_summary, snapshot.Summary);
+            Replace(_durableItems, snapshot.DurableItems);
             Replace(_consumableEntries, snapshot.ConsumableEntries);
             Replace(_expiringEntries, snapshot.ExpiringEntries);
             Replace(_suggestions, snapshot.Suggestions);
@@ -136,6 +161,7 @@ public sealed class MainPage : ContentPage
 
             return new PantrySnapshot(
                 ProjectList<InventorySummaryItem>(_store.GetSummary()),
+                _store.GetDurableEntries().Select(ToMobileDurableItem).ToList(),
                 _store.GetConsumableEntryReadModels(todayUtc).Select(ToMobileEntry).ToList(),
                 _store.GetExpiringConsumableEntries(todayUtc).Select(ToMobileEntry).ToList(),
                 _suggestionService.GetSuggestions(rules, entries).Select(ToMobileSuggestion).ToList(),
@@ -166,6 +192,105 @@ public sealed class MainPage : ContentPage
         section.Children.Add(_storageSlotEntry);
         section.Children.Add(Button("Add Entry", AddConsumableEntryAsync));
         _content.Children.Add(section);
+    }
+
+    private void AddDurableFormSection()
+    {
+        var section = Section("Create Durable Item");
+        section.Children.Add(_durableNameEntry);
+        section.Children.Add(GridRows(_durableTypeEntry, _durableStatusPicker));
+        section.Children.Add(_durableLocationEntry);
+        section.Children.Add(GridRows(_durableBrandEntry, _durableModelEntry));
+        section.Children.Add(_durableSerialEntry);
+        section.Children.Add(GridRows(_durablePurchaseDateEntry, _durablePurchaseValueEntry));
+        section.Children.Add(_durableWarrantyEntry);
+        section.Children.Add(_durableDescriptionEntry);
+        section.Children.Add(_durableNotesEntry);
+        section.Children.Add(_durableStorageSlotEntry);
+        section.Children.Add(_durableSaveButton);
+        section.Children.Add(_durableCancelButton);
+        _content.Children.Add(section);
+    }
+
+    private void AddDurableItemsSection()
+    {
+        var section = Section("Durable Items");
+
+        if (_durableItems.Count == 0)
+        {
+            section.Children.Add(new Label { Text = "No durable items." });
+        }
+        else
+        {
+            foreach (var item in _durableItems)
+            {
+                section.Children.Add(DurableItemCard(item));
+            }
+        }
+
+        section.Children.Add(new Label
+        {
+            Text = "Durable Item Detail",
+            FontAttributes = FontAttributes.Bold
+        });
+
+        var selected = _durableItems.FirstOrDefault(item => item.Id == _selectedDurableEntryId);
+        section.Children.Add(selected is null
+            ? new Label { Text = "Open a durable item to view details." }
+            : DurableDetailCard(selected));
+
+        _dataContent.Children.Add(section);
+    }
+
+    private View DurableItemCard(DurableItem item)
+    {
+        var location = DurableLocation(item);
+        var layout = new VerticalStackLayout { Spacing = 6 };
+        layout.Children.Add(new Label
+        {
+            Text = $"{item.DisplayName}: {DurableType(item)} [{item.Status}]",
+            FontAttributes = FontAttributes.Bold
+        });
+        layout.Children.Add(new Label { Text = $"Location: {location} | {WarrantyIndicator(item)}" });
+
+        var actions = new HorizontalStackLayout { Spacing = 8 };
+        actions.Children.Add(Button("Open Details", () =>
+        {
+            _selectedDurableEntryId = item.Id;
+            RebuildDataSections();
+            return Task.CompletedTask;
+        }));
+        actions.Children.Add(Button("Edit", () =>
+        {
+            StartDurableEdit(item);
+            return Task.CompletedTask;
+        }));
+
+        if (!string.Equals(item.Status, DurableItemStatus.Retired.ToString(), StringComparison.OrdinalIgnoreCase))
+        {
+            actions.Children.Add(Button("Retire", async () => await RetireDurableItemAsync(item)));
+        }
+
+        layout.Children.Add(actions);
+        return Card(layout);
+    }
+
+    private static View DurableDetailCard(DurableItem item)
+    {
+        var layout = new VerticalStackLayout { Spacing = 4 };
+        layout.Children.Add(new Label { Text = item.DisplayName, FontAttributes = FontAttributes.Bold });
+        layout.Children.Add(new Label { Text = $"Type: {DurableType(item)}" });
+        layout.Children.Add(new Label { Text = $"Status: {item.Status}" });
+        layout.Children.Add(new Label { Text = $"Location: {DurableLocation(item)}" });
+        layout.Children.Add(new Label { Text = $"Brand / manufacturer: {NotRecorded(item.BrandManufacturer)}" });
+        layout.Children.Add(new Label { Text = $"Model: {NotRecorded(item.Model)}" });
+        layout.Children.Add(new Label { Text = $"Serial number: {NotRecorded(item.SerialNumber)}" });
+        layout.Children.Add(new Label { Text = $"Purchase date: {NotRecorded(item.PurchaseDate)}" });
+        layout.Children.Add(new Label { Text = $"Purchase value: {(item.PurchaseValue.HasValue ? item.PurchaseValue.Value.ToString(CultureInfo.InvariantCulture) : "Not recorded")}" });
+        layout.Children.Add(new Label { Text = WarrantyIndicator(item) });
+        layout.Children.Add(new Label { Text = $"Description: {NotRecorded(item.Description)}" });
+        layout.Children.Add(new Label { Text = $"Notes: {NotRecorded(item.Notes)}" });
+        return Card(layout);
     }
 
     private void AddInventorySummarySection()
@@ -514,6 +639,111 @@ public sealed class MainPage : ContentPage
         }
     }
 
+    private async Task SaveDurableItemAsync()
+    {
+        var displayName = (_durableNameEntry.Text ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(displayName))
+        {
+            SetStatus("Durable item name is required.", isError: true);
+            return;
+        }
+
+        if (!TryParseSelectedDurableStatus(out var status) ||
+            !TryParseOptionalDate(_durablePurchaseDateEntry.Text, "Purchase date", out var purchaseDate) ||
+            !TryParseOptionalDate(_durableWarrantyEntry.Text, "Warranty end", out var warrantyEndsOn) ||
+            !TryParseOptionalGuid(_durableStorageSlotEntry.Text, "Storage slot ID", out var storageSlotId))
+        {
+            return;
+        }
+
+        var purchaseValue = ParseNullableDecimal(_durablePurchaseValueEntry.Text);
+        if (purchaseValue is null && !string.IsNullOrWhiteSpace(_durablePurchaseValueEntry.Text))
+        {
+            SetStatus("Purchase value must be a number.", isError: true);
+            return;
+        }
+
+        try
+        {
+            DurableItemReadModel? saved;
+
+            if (Guid.TryParse(_editingDurableEntryId, out var entryId))
+            {
+                saved = _store.UpdateDurableEntry(
+                    entryId,
+                    displayName,
+                    BlankToNull(_durableDescriptionEntry.Text),
+                    BlankToNull(_durableTypeEntry.Text),
+                    BlankToNull(_durableBrandEntry.Text),
+                    BlankToNull(_durableModelEntry.Text),
+                    BlankToNull(_durableSerialEntry.Text),
+                    purchaseDate,
+                    purchaseValue,
+                    warrantyEndsOn,
+                    status,
+                    BlankToNull(_durableLocationEntry.Text),
+                    BlankToNull(_durableNotesEntry.Text),
+                    storageSlotId);
+
+                if (saved is null)
+                {
+                    SetStatus("Durable item was not found.", isError: true);
+                    return;
+                }
+            }
+            else
+            {
+                saved = _store.CreateDurableItem(
+                    displayName,
+                    BlankToNull(_durableDescriptionEntry.Text),
+                    BlankToNull(_durableTypeEntry.Text),
+                    BlankToNull(_durableBrandEntry.Text),
+                    BlankToNull(_durableModelEntry.Text),
+                    BlankToNull(_durableSerialEntry.Text),
+                    purchaseDate,
+                    purchaseValue,
+                    warrantyEndsOn,
+                    status,
+                    BlankToNull(_durableLocationEntry.Text),
+                    BlankToNull(_durableNotesEntry.Text),
+                    storageSlotId);
+            }
+
+            _selectedDurableEntryId = saved.Id.ToString();
+            ClearDurableForm();
+            await LoadDataAsync();
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Save durable item failed: {ex.Message}", isError: true);
+        }
+    }
+
+    private async Task RetireDurableItemAsync(DurableItem item)
+    {
+        var confirmed = await DisplayAlert("Retire durable item", $"Retire {item.DisplayName}?", "Retire", "Cancel");
+        if (!confirmed)
+        {
+            return;
+        }
+
+        if (!Guid.TryParse(item.Id, out var entryId))
+        {
+            SetStatus("Durable item ID is invalid.", isError: true);
+            return;
+        }
+
+        var retired = _store.RetireDurableEntry(entryId, item.Notes);
+        if (retired is null)
+        {
+            SetStatus("Durable item was not found.", isError: true);
+            return;
+        }
+
+        _selectedDurableEntryId = retired.Id.ToString();
+        await LoadDataAsync();
+    }
+
     private async Task SaveEntryAsync(ConsumableEntry entry, string? quantityText, string? unitText, string? expiryText, string? storageSlotText)
     {
         var quantity = ParseRequiredDecimal(quantityText, "Quantity");
@@ -714,6 +944,61 @@ public sealed class MainPage : ContentPage
         {
             SetStatus($"Update rule failed: {ex.Message}", isError: true);
         }
+    }
+
+    private void StartDurableEdit(DurableItem item)
+    {
+        _editingDurableEntryId = item.Id;
+        _selectedDurableEntryId = item.Id;
+        _durableNameEntry.Text = item.DisplayName;
+        _durableTypeEntry.Text = item.ItemType;
+        _durableStatusPicker.SelectedItem = item.Status;
+        _durableLocationEntry.Text = item.CurrentLocation;
+        _durableBrandEntry.Text = item.BrandManufacturer;
+        _durableModelEntry.Text = item.Model;
+        _durableSerialEntry.Text = item.SerialNumber;
+        _durablePurchaseDateEntry.Text = item.PurchaseDate;
+        _durablePurchaseValueEntry.Text = item.PurchaseValue?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
+        _durableWarrantyEntry.Text = item.WarrantyEndsOn;
+        _durableDescriptionEntry.Text = item.Description;
+        _durableNotesEntry.Text = item.Notes;
+        _durableStorageSlotEntry.Text = item.StorageSlotId;
+        _durableSaveButton.Text = "Save Durable Item";
+        _durableCancelButton.IsVisible = true;
+        RebuildDataSections();
+    }
+
+    private void ClearDurableForm()
+    {
+        _editingDurableEntryId = null;
+        _durableNameEntry.Text = string.Empty;
+        _durableTypeEntry.Text = string.Empty;
+        _durableStatusPicker.SelectedItem = DurableItemStatus.Active.ToString();
+        _durableLocationEntry.Text = string.Empty;
+        _durableBrandEntry.Text = string.Empty;
+        _durableModelEntry.Text = string.Empty;
+        _durableSerialEntry.Text = string.Empty;
+        _durablePurchaseDateEntry.Text = string.Empty;
+        _durablePurchaseValueEntry.Text = string.Empty;
+        _durableWarrantyEntry.Text = string.Empty;
+        _durableDescriptionEntry.Text = string.Empty;
+        _durableNotesEntry.Text = string.Empty;
+        _durableStorageSlotEntry.Text = string.Empty;
+        _durableSaveButton.Text = "Create Durable Item";
+        _durableCancelButton.IsVisible = false;
+    }
+
+    private bool TryParseSelectedDurableStatus(out DurableItemStatus status)
+    {
+        var value = _durableStatusPicker.SelectedItem as string ?? DurableItemStatus.Active.ToString();
+        if (Enum.TryParse(value, ignoreCase: true, out status) &&
+            Enum.IsDefined(typeof(DurableItemStatus), status))
+        {
+            return true;
+        }
+
+        SetStatus("Durable item status is invalid.", isError: true);
+        return false;
     }
 
     private void RefreshItemPicker()
@@ -942,6 +1227,30 @@ public sealed class MainPage : ContentPage
             ?? (!string.IsNullOrWhiteSpace(rule.ItemName) ? rule.ItemName : rule.ItemDefinitionId);
     }
 
+    private static string DurableType(DurableItem item)
+    {
+        return string.IsNullOrWhiteSpace(item.ItemType) ? "Uncategorized" : item.ItemType;
+    }
+
+    private static string DurableLocation(DurableItem item)
+    {
+        return !string.IsNullOrWhiteSpace(item.CurrentLocation)
+            ? item.CurrentLocation
+            : !string.IsNullOrWhiteSpace(item.StorageSlotId)
+                ? item.StorageSlotId
+                : "No location set";
+    }
+
+    private static string WarrantyIndicator(DurableItem item)
+    {
+        return string.IsNullOrWhiteSpace(item.WarrantyEndsOn) ? "No warranty recorded" : $"Warranty through {item.WarrantyEndsOn}";
+    }
+
+    private static string NotRecorded(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? "Not recorded" : value;
+    }
+
     private static string SuggestionBreakdown(ReplenishmentSuggestion suggestion)
     {
         return $"Breakdown: current {suggestion.UsableCurrentQuantity.ToString(CultureInfo.InvariantCulture)} {suggestion.Unit}; required {suggestion.RequiredAmount.ToString(CultureInfo.InvariantCulture)} {suggestion.Unit}; suggested {suggestion.SuggestedPurchaseAmount.ToString(CultureInfo.InvariantCulture)} {suggestion.Unit}; rule source replenishment target; desired {suggestion.DesiredQuantity.ToString(CultureInfo.InvariantCulture)} {suggestion.Unit}; usable {suggestion.UsableCurrentQuantity.ToString(CultureInfo.InvariantCulture)} {suggestion.Unit}; deficit {suggestion.DeficitAmount.ToString(CultureInfo.InvariantCulture)} {suggestion.Unit}; expiring soon {suggestion.ExpiringSoonAmount.ToString(CultureInfo.InvariantCulture)} {suggestion.Unit}";
@@ -1001,6 +1310,26 @@ public sealed class MainPage : ContentPage
             rule.IsDisabled);
     }
 
+    private static DurableItem ToMobileDurableItem(DurableItemReadModel item)
+    {
+        return new DurableItem(
+            item.Id.ToString(),
+            item.ItemDefinitionId.ToString(),
+            item.DisplayName,
+            item.Description,
+            item.ItemType,
+            item.BrandManufacturer,
+            item.Model,
+            item.SerialNumber,
+            item.PurchaseDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            item.PurchaseValue,
+            item.WarrantyEndsOn?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            item.Status,
+            item.CurrentLocation,
+            item.Notes,
+            item.StorageSlotId?.ToString());
+    }
+
     private static View LabeledField(string labelText, View field, string description, string? help = null)
     {
         var label = new Label { Text = labelText };
@@ -1042,12 +1371,14 @@ public sealed class MainPage : ContentPage
     }
 
     private sealed record InventorySummaryItem(string ItemDefinitionId, string ItemName, decimal? TotalQuantity, string? Unit, int EntryCount, bool HasMixedUnits, string? MixedUnitWarning);
+    private sealed record DurableItem(string Id, string ItemDefinitionId, string DisplayName, string? Description, string? ItemType, string? BrandManufacturer, string? Model, string? SerialNumber, string? PurchaseDate, decimal? PurchaseValue, string? WarrantyEndsOn, string Status, string? CurrentLocation, string? Notes, string? StorageSlotId);
     private sealed record ConsumableEntry(string EntryId, string ItemDefinitionId, string ItemName, decimal Quantity, string Unit, string? ExpiresOn, int? ExpiresInDays, string ExpiryStatus, string? StorageSlotId);
     private sealed record ReplenishmentSuggestion(string ItemDefinitionId, string ItemName, decimal CurrentQuantity, decimal UsableCurrentQuantity, decimal DesiredQuantity, decimal DeficitAmount, decimal ExpiringSoonAmount, decimal SuggestedPurchaseAmount, decimal RequiredAmount, string Unit, List<ConsumableEntry> Entries);
     private sealed record ReplenishmentRule(string Id, string ItemDefinitionId, string ItemName, decimal DesiredAmount, string DesiredUnit, int ExpiryWarningDays, bool IsDisabled);
     private sealed record ShoppingListItem(string Id, string ItemDefinitionId, string ItemName, decimal Quantity, string Unit, bool IsResolved, bool IsPurchased, string Status, bool StockUpdateNeeded, string? NextInventoryAction, decimal? SourceDeficitAmount, decimal? SourceExpiringSoonAmount, decimal? SourceSuggestedPurchaseAmount);
     private sealed record PantrySnapshot(
         List<InventorySummaryItem> Summary,
+        List<DurableItem> DurableItems,
         List<ConsumableEntry> ConsumableEntries,
         List<ConsumableEntry> ExpiringEntries,
         List<ReplenishmentSuggestion> Suggestions,

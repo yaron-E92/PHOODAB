@@ -11,9 +11,14 @@ const getExpiringConsumableEntriesMock = vi.fn();
 const getReplenishmentSuggestionsMock = vi.fn();
 const getReplenishmentRulesMock = vi.fn();
 const getShoppingListItemsMock = vi.fn();
+const getDurableItemsMock = vi.fn();
+const getDurableItemMock = vi.fn();
 const createConsumableItemMock = vi.fn().mockResolvedValue({ id: 'item-1', name: 'Milk', kind: 'Consumable' });
+const createDurableItemMock = vi.fn();
 const addConsumableEntryMock = vi.fn();
 const updateConsumableEntryMock = vi.fn();
+const updateDurableItemMock = vi.fn();
+const retireDurableItemMock = vi.fn();
 const createShoppingListItemFromSuggestionMock = vi.fn();
 const updateShoppingListItemStatusMock = vi.fn();
 const deleteShoppingListItemMock = vi.fn();
@@ -28,9 +33,14 @@ vi.mock('../../../packages/api-client/src/client', () => ({
   getReplenishmentSuggestions: getReplenishmentSuggestionsMock,
   getReplenishmentRules: getReplenishmentRulesMock,
   getShoppingListItems: getShoppingListItemsMock,
+  getDurableItems: getDurableItemsMock,
+  getDurableItem: getDurableItemMock,
   createConsumableItem: createConsumableItemMock,
+  createDurableItem: createDurableItemMock,
   addConsumableEntry: addConsumableEntryMock,
   updateConsumableEntry: updateConsumableEntryMock,
+  updateDurableItem: updateDurableItemMock,
+  retireDurableItem: retireDurableItemMock,
   createShoppingListItemFromSuggestion: createShoppingListItemFromSuggestionMock,
   updateShoppingListItemStatus: updateShoppingListItemStatusMock,
   deleteShoppingListItem: deleteShoppingListItemMock,
@@ -55,6 +65,75 @@ describe('pantry mvp page', () => {
     getReplenishmentSuggestionsMock.mockResolvedValue([]);
     getReplenishmentRulesMock.mockResolvedValue([]);
     getShoppingListItemsMock.mockResolvedValue([]);
+    getDurableItemsMock.mockResolvedValue([]);
+    getDurableItemMock.mockResolvedValue({
+      id: 'durable-1',
+      itemDefinitionId: 'definition-1',
+      displayName: 'Laptop',
+      description: 'Work computer',
+      itemType: 'Electronics',
+      brandManufacturer: 'Contoso',
+      model: 'Pro 13',
+      serialNumber: 'SN-1',
+      purchaseDate: '2026-01-01',
+      purchaseValue: 1200,
+      warrantyEndsOn: '2027-01-01',
+      status: 'Active',
+      currentLocation: 'Office',
+      notes: 'Assigned to desk',
+      storageSlotId: null
+    });
+    createDurableItemMock.mockResolvedValue({
+      id: 'durable-new',
+      itemDefinitionId: 'definition-new',
+      displayName: 'Camera',
+      description: null,
+      itemType: 'Electronics',
+      brandManufacturer: null,
+      model: null,
+      serialNumber: null,
+      purchaseDate: null,
+      purchaseValue: null,
+      warrantyEndsOn: null,
+      status: 'Active',
+      currentLocation: 'Hall closet',
+      notes: null,
+      storageSlotId: null
+    });
+    updateDurableItemMock.mockResolvedValue({
+      id: 'durable-1',
+      itemDefinitionId: 'definition-1',
+      displayName: 'Laptop',
+      description: 'Work computer',
+      itemType: 'Electronics',
+      brandManufacturer: 'Contoso',
+      model: 'Pro 13',
+      serialNumber: 'SN-1',
+      purchaseDate: '2026-01-01',
+      purchaseValue: 1200,
+      warrantyEndsOn: '2027-01-01',
+      status: 'Stored',
+      currentLocation: 'Office shelf',
+      notes: 'Assigned to desk',
+      storageSlotId: null
+    });
+    retireDurableItemMock.mockResolvedValue({
+      id: 'durable-1',
+      itemDefinitionId: 'definition-1',
+      displayName: 'Laptop',
+      description: 'Work computer',
+      itemType: 'Electronics',
+      brandManufacturer: 'Contoso',
+      model: 'Pro 13',
+      serialNumber: 'SN-1',
+      purchaseDate: '2026-01-01',
+      purchaseValue: 1200,
+      warrantyEndsOn: '2027-01-01',
+      status: 'Retired',
+      currentLocation: 'Office',
+      notes: 'Assigned to desk',
+      storageSlotId: null
+    });
   });
 
   it('shows loading then empty states', async () => {
@@ -69,8 +148,139 @@ describe('pantry mvp page', () => {
     });
 
     expect(container.textContent).toContain('No inventory yet.');
+    expect(container.textContent).toContain('No durable items.');
+    expect(container.textContent).toContain('Open a durable item to view details.');
     expect(container.textContent).toContain('No expiring entries.');
     expect(container.textContent).toContain('No replenishment needed.');
+  });
+
+  it('creates durable items from the durable item form', async () => {
+    const { App } = await import('./main');
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<App />);
+      await Promise.resolve();
+    });
+
+    const nameInput = container.querySelector('input[aria-label="Durable item name"]') as HTMLInputElement;
+    const typeInput = container.querySelector('input[aria-label="Durable item type"]') as HTMLInputElement;
+    const locationInput = container.querySelector('input[aria-label="Durable item location"]') as HTMLInputElement;
+    const warrantyInput = container.querySelector('input[aria-label="Durable item warranty end"]') as HTMLInputElement;
+
+    await act(async () => {
+      nameInput.value = 'Camera';
+      nameInput.dispatchEvent(new Event('input', { bubbles: true }));
+      typeInput.value = 'Electronics';
+      typeInput.dispatchEvent(new Event('input', { bubbles: true }));
+      locationInput.value = 'Hall closet';
+      locationInput.dispatchEvent(new Event('input', { bubbles: true }));
+      warrantyInput.value = '2027-03-01';
+      warrantyInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    await act(async () => {
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Create Durable Item')!.click();
+      await Promise.resolve();
+    });
+
+    expect(createDurableItemMock).toHaveBeenCalledWith('http://localhost:5199', {
+      displayName: 'Camera',
+      description: null,
+      itemType: 'Electronics',
+      brandManufacturer: null,
+      model: null,
+      serialNumber: null,
+      purchaseDate: null,
+      purchaseValue: null,
+      warrantyEndsOn: '2027-03-01',
+      status: 'Active',
+      currentLocation: 'Hall closet',
+      notes: null,
+      storageSlotId: null
+    });
+  });
+
+  it('shows durable item list, opens details, edits, and retires items', async () => {
+    getDurableItemsMock.mockResolvedValue([
+      {
+        id: 'durable-1',
+        itemDefinitionId: 'definition-1',
+        displayName: 'Laptop',
+        description: 'Work computer',
+        itemType: 'Electronics',
+        brandManufacturer: 'Contoso',
+        model: 'Pro 13',
+        serialNumber: 'SN-1',
+        purchaseDate: '2026-01-01',
+        purchaseValue: 1200,
+        warrantyEndsOn: '2027-01-01',
+        status: 'Active',
+        currentLocation: 'Office',
+        notes: 'Assigned to desk',
+        storageSlotId: null
+      }
+    ]);
+
+    const { App } = await import('./main');
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<App />);
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain('Laptop: Electronics [Active]');
+    expect(container.textContent).toContain('Location: Office | Warranty through 2027-01-01');
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('button[aria-label="Open durable item Laptop"]')!.click();
+      await Promise.resolve();
+    });
+
+    expect(getDurableItemMock).toHaveBeenCalledWith('http://localhost:5199', 'durable-1');
+    expect(container.textContent).toContain('Brand / manufacturer: Contoso');
+    expect(container.textContent).toContain('Serial number: SN-1');
+    expect(container.textContent).toContain('Notes: Assigned to desk');
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('button[aria-label="Edit durable item Laptop"]')!.click();
+    });
+
+    const statusSelect = container.querySelector('select[aria-label="Durable item status"]') as HTMLSelectElement;
+    const locationInput = container.querySelector('input[aria-label="Durable item location"]') as HTMLInputElement;
+
+    await act(async () => {
+      statusSelect.value = 'Stored';
+      statusSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      locationInput.value = 'Office shelf';
+      locationInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    await act(async () => {
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Save Durable Item')!.click();
+      await Promise.resolve();
+    });
+
+    expect(updateDurableItemMock).toHaveBeenCalledWith('http://localhost:5199', 'durable-1', expect.objectContaining({
+      displayName: 'Laptop',
+      currentLocation: 'Office shelf',
+      status: 'Stored',
+      warrantyEndsOn: '2027-01-01'
+    }));
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('button[aria-label="Retire durable item Laptop"]')!.click();
+      await Promise.resolve();
+    });
+
+    expect(retireDurableItemMock).toHaveBeenCalledWith('http://localhost:5199', 'durable-1', { notes: 'Assigned to desk' });
   });
 
   it('renders backend-provided expiryStatus and replenishment breakdown values', async () => {
