@@ -1,6 +1,10 @@
 {
   "name": "phoodab",
   "private": true,
+  "scripts": {
+    "build": "npm run build --workspace phoodab/apps/web",
+    "test": "npm test --workspace phoodab/apps/web"
+  },
   "workspaces": [
     "phoodab/apps/web",
     "phoodab/packages/api-client"
