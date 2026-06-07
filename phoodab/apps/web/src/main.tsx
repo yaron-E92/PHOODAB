@@ -149,7 +149,27 @@ const getShoppingStatusLabel = (item: ShoppingListItem) => {
   }
 };
 
+type PageId = 'dashboard' | 'inventory' | 'shopping' | 'locations' | 'durable';
+
+const navItems: { id: PageId; label: string }[] = [
+  { id: 'dashboard', label: 'Dashboard' },
+  { id: 'inventory', label: 'Pantry' },
+  { id: 'shopping', label: 'Shopping List' },
+  { id: 'locations', label: 'Locations' },
+  { id: 'durable', label: 'Equipment' }
+];
+
+const cardStyle: React.CSSProperties = {
+  border: '1px solid #d4d4d8',
+  borderRadius: 8,
+  padding: 16,
+  background: '#fff'
+};
+
+const mutedTextStyle: React.CSSProperties = { color: '#52525b' };
+
 export function App() {
+  const [activePage, setActivePage] = useState<PageId>('dashboard');
   const [health, setHealth] = useState<string>('loading');
   const [version, setVersion] = useState<string>('loading');
 
@@ -519,13 +539,175 @@ export function App() {
   const selectedDurableDetail = selectedDurableItem?.id
     ? durableItems.find((item) => item.id === selectedDurableItem.id) ?? selectedDurableItem
     : selectedDurableItem;
+  const activePageTitle = navItems.find((item) => item.id === activePage)?.label ?? 'Dashboard';
+  const lowStockSuggestions = suggestions.filter((suggestion) => suggestion.deficitAmount > 0);
+  const recentInventoryEntries = consumableEntries.slice(0, 3);
+  const shoppingActionItems = shoppingListItems.filter((item) => {
+    const status = getShoppingStatus(item);
+    return status === 'ShoppingList' || status === 'InCart' || status === 'StockUpdateNeeded';
+  });
+  const locationRows = [
+    ...consumableEntries
+      .filter((entry) => entry.storageSlotId)
+      .map((entry) => ({
+        id: `consumable-${entry.entryId}`,
+        location: entry.storageSlotId!,
+        label: `${entry.itemName} lot ${entry.entryId}`,
+        detail: `${entry.quantity} ${entry.unit}`
+      })),
+    ...durableItems
+      .filter((item) => item.currentLocation || item.storageSlotId)
+      .map((item) => ({
+        id: `durable-${item.id ?? item.itemDefinitionId ?? getDurableDisplayName(item)}`,
+        location: item.currentLocation || item.storageSlotId || 'No location set',
+        label: getDurableDisplayName(item),
+        detail: `${item.itemType || 'Durable item'} [${item.status}]`
+      }))
+  ];
 
   return (
-    <main style={{ fontFamily: 'system-ui', padding: 16 }}>
-      <h1>PHOODAB Pantry MVP</h1>
-      <p>Health: {health}</p>
-      <p>Version: {version}</p>
+    <main style={{ fontFamily: 'system-ui', minHeight: '100vh', background: '#f4f4f5', color: '#18181b' }}>
+      <style>
+        {`
+          @media (max-width: 720px) {
+            .app-header {
+              align-items: stretch;
+            }
+            .app-nav {
+              grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+            .dashboard-grid {
+              grid-template-columns: 1fr;
+            }
+          }
+        `}
+      </style>
+      <header
+        className="app-header"
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 16,
+          padding: '20px 24px',
+          background: '#fff',
+          borderBottom: '1px solid #d4d4d8'
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', alignItems: 'end' }}>
+          <div>
+            <h1 style={{ margin: 0 }}>PHOODAB</h1>
+            <p style={{ ...mutedTextStyle, margin: '4px 0 0' }}>Pantry, shopping, locations, and durable inventory</p>
+          </div>
+          <div style={{ ...mutedTextStyle, fontSize: 14 }}>
+            Health: {health} | Version: {version}
+          </div>
+        </div>
+        <nav className="app-nav" aria-label="Primary" style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 8 }}>
+          {navItems.map((item) => {
+            const isActive = activePage === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                aria-current={isActive ? 'page' : undefined}
+                onClick={() => setActivePage(item.id)}
+                style={{
+                  border: `1px solid ${isActive ? '#0f766e' : '#d4d4d8'}`,
+                  borderRadius: 8,
+                  padding: '10px 12px',
+                  background: isActive ? '#ccfbf1' : '#fff',
+                  color: '#18181b',
+                  fontWeight: isActive ? 700 : 500,
+                  cursor: 'pointer'
+                }}
+              >
+                {item.label}
+              </button>
+            );
+          })}
+        </nav>
+      </header>
+      <section style={{ padding: 24 }}>
+        <h2 id="page-title" style={{ marginTop: 0 }}>{activePageTitle}</h2>
+        {activePage === 'dashboard' && (
+          <>
+            <p style={mutedTextStyle}>What should I care about right now?</p>
+            {isLoading && <p>Loading pantry data...</p>}
+            {error && <p>Error: {error}</p>}
+            {!isLoading && !error && (
+              <div className="dashboard-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
+                <section style={cardStyle}>
+                  <h3>Low-stock consumables</h3>
+                  {lowStockSuggestions.length === 0 && <p>Everything with a replenishment rule has enough usable stock.</p>}
+                  {lowStockSuggestions.length > 0 && (
+                    <ul>
+                      {lowStockSuggestions.slice(0, 4).map((suggestion) => (
+                        <li key={suggestion.itemDefinitionId}>
+                          {suggestion.itemName} needs {suggestion.suggestedPurchaseAmount} {suggestion.unit}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+                <section style={cardStyle}>
+                  <h3>Expiring items</h3>
+                  {expiringEntries.length === 0 && <p>No expiring or expired lots need attention.</p>}
+                  {expiringEntries.length > 0 && (
+                    <ul>
+                      {expiringEntries.slice(0, 4).map((entry) => (
+                        <li key={entry.entryId}>
+                          {entry.itemName} - {entry.quantity} {entry.unit} - {entry.expiryStatus}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+                <section style={cardStyle}>
+                  <h3>Recently updated inventory</h3>
+                  {recentInventoryEntries.length === 0 && <p>No inventory lots have been recorded yet.</p>}
+                  {recentInventoryEntries.length > 0 && (
+                    <ul>
+                      {recentInventoryEntries.map((entry) => (
+                        <li key={entry.entryId}>
+                          {entry.itemName} lot {entry.entryId}: {entry.quantity} {entry.unit}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+                <section style={cardStyle}>
+                  <h3>Replenishment suggestions</h3>
+                  {suggestions.length === 0 && <p>No replenishment needed right now.</p>}
+                  {suggestions.length > 0 && (
+                    <ul>
+                      {suggestions.slice(0, 4).map((suggestion) => (
+                        <li key={suggestion.itemDefinitionId}>
+                          {suggestion.itemName}: Buy {suggestion.suggestedPurchaseAmount} {suggestion.unit}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+                <section style={cardStyle}>
+                  <h3>Shopping actions</h3>
+                  {shoppingActionItems.length === 0 && <p>No shopping list or cart items need action.</p>}
+                  {shoppingActionItems.length > 0 && (
+                    <ul>
+                      {shoppingActionItems.slice(0, 4).map((item) => (
+                        <li key={item.id}>
+                          {item.itemName}: {item.quantity} {item.unit} [{getShoppingStatusLabel(item)}]
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+              </div>
+            )}
+          </>
+        )}
 
+      {activePage === 'inventory' && (
+        <>
       <h2>Create Consumable Item</h2>
       <form onSubmit={onCreateItem}>
         <input placeholder="Item name" value={itemName} onChange={(e) => setItemName(e.target.value)} />
@@ -563,8 +745,12 @@ export function App() {
         <input placeholder="Storage slot ID (optional)" value={storageSlotId} onChange={(e) => setStorageSlotId(e.target.value)} />
         <button type="submit">Add Entry</button>
       </form>
+        </>
+      )}
 
-      <h2>Durable Items</h2>
+      {activePage === 'durable' && (
+        <>
+      <h2>Equipment</h2>
       <form onSubmit={onSaveDurableItem}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'end' }}>
           <input
@@ -695,7 +881,11 @@ export function App() {
           <div>Notes: {selectedDurableDetail.notes || 'Not recorded'}</div>
         </section>
       )}
+        </>
+      )}
 
+      {activePage === 'inventory' && (
+        <>
       <h2>Inventory Summary</h2>
       {isLoading && <p>Loading pantry data...</p>}
       {error && <p>Error: {error}</p>}
@@ -917,7 +1107,28 @@ export function App() {
           })}
         </ul>
       )}
+        </>
+      )}
 
+      {activePage === 'locations' && (
+        <>
+          {!isLoading && !error && locationRows.length === 0 && <p>No inventory or durable items have assigned locations yet.</p>}
+          {!isLoading && !error && locationRows.length > 0 && (
+            <ul>
+              {locationRows.map((row) => (
+                <li key={row.id} style={{ marginBottom: 12 }}>
+                  <strong>{row.location}</strong>
+                  <div>{row.label}</div>
+                  <div style={mutedTextStyle}>{row.detail}</div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+
+      {activePage === 'shopping' && (
+        <>
       <h2>Shopping List</h2>
       {!isLoading && !error && shoppingListItems.length === 0 && <p>No shopping items.</p>}
       {!isLoading && !error && shoppingListItems.length > 0 && (
@@ -951,6 +1162,9 @@ export function App() {
           })}
         </ul>
       )}
+        </>
+      )}
+      </section>
     </main>
   );
 }
