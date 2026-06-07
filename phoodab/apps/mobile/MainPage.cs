@@ -45,6 +45,8 @@ public sealed class MainPage : ContentPage
     private readonly FlexLayout _navigation = new() { Direction = FlexDirection.Row, Wrap = FlexWrap.Wrap, AlignItems = FlexAlignItems.Stretch };
     private readonly Label _pageTitleLabel = new() { FontSize = 24, FontAttributes = FontAttributes.Bold, TextColor = Colors.Black };
     private readonly VerticalStackLayout _dataContent = new() { Spacing = 16 };
+    private readonly VerticalStackLayout _durableDetailContent = new() { Spacing = 8 };
+    private readonly Dictionary<PageId, Button> _navigationButtons = [];
 
     private readonly List<ItemOption> _createdItems = [];
     private readonly List<InventorySummaryItem> _summary = [];
@@ -109,6 +111,7 @@ public sealed class MainPage : ContentPage
             Text = "Pantry, shopping, locations, and durable inventory",
             TextColor = Colors.DarkSlateGray
         });
+        BuildNavigation();
         _content.Children.Add(_navigation);
         _content.Children.Add(Button("Refresh", async () => await LoadDataAsync()));
         _content.Children.Add(_healthLabel);
@@ -120,8 +123,9 @@ public sealed class MainPage : ContentPage
 
     private void RebuildDataSections()
     {
-        RebuildNavigation();
+        UpdateNavigation();
         _pageTitleLabel.Text = PageTitle(_activePage);
+        DetachReusableControls();
         _dataContent.Children.Clear();
 
         switch (_activePage)
@@ -151,26 +155,37 @@ public sealed class MainPage : ContentPage
         }
     }
 
-    private void RebuildNavigation()
+    private void BuildNavigation()
     {
         _navigation.Children.Clear();
+        _navigationButtons.Clear();
 
         foreach (var page in Enum.GetValues<PageId>())
         {
-            var isActive = _activePage == page;
-            var button = Button(PageTitle(page), async () =>
+            var button = Button(PageTitle(page), () =>
             {
                 _activePage = page;
-                await Task.Yield();
                 RebuildDataSections();
+                return Task.CompletedTask;
             });
-            button.BackgroundColor = isActive ? Colors.LightSeaGreen : Colors.White;
-            button.TextColor = isActive ? Colors.White : Colors.Black;
-            button.BorderColor = isActive ? Colors.LightSeaGreen : Colors.LightGray;
             button.BorderWidth = 1;
             button.WidthRequest = 150;
             button.Margin = new Thickness(0, 0, 8, 8);
+            _navigationButtons[page] = button;
             _navigation.Children.Add(button);
+        }
+
+        UpdateNavigation();
+    }
+
+    private void UpdateNavigation()
+    {
+        foreach (var (page, button) in _navigationButtons)
+        {
+            var isActive = _activePage == page;
+            button.BackgroundColor = isActive ? Colors.LightSeaGreen : Colors.White;
+            button.TextColor = isActive ? Colors.White : Colors.Black;
+            button.BorderColor = isActive ? Colors.LightSeaGreen : Colors.LightGray;
         }
     }
 
@@ -358,11 +373,8 @@ public sealed class MainPage : ContentPage
             Text = "Durable Item Detail",
             FontAttributes = FontAttributes.Bold
         });
-
-        var selected = _durableItems.FirstOrDefault(item => item.Id == _selectedDurableEntryId);
-        section.Children.Add(selected is null
-            ? new Label { Text = "Open a durable item to view details." }
-            : DurableDetailCard(selected));
+        section.Children.Add(_durableDetailContent);
+        RefreshDurableDetail();
 
         _dataContent.Children.Add(section);
     }
@@ -379,17 +391,16 @@ public sealed class MainPage : ContentPage
         layout.Children.Add(new Label { Text = $"Location: {location} | {WarrantyIndicator(item)}" });
 
         var actions = new HorizontalStackLayout { Spacing = 8 };
-        actions.Children.Add(Button("Open Details", async () =>
+        actions.Children.Add(Button("Open Details", () =>
         {
             _selectedDurableEntryId = item.Id;
-            await Task.Yield();
-            RebuildDataSections();
+            RefreshDurableDetail();
+            return Task.CompletedTask;
         }));
-        actions.Children.Add(Button("Edit", async () =>
+        actions.Children.Add(Button("Edit", () =>
         {
             StartDurableEdit(item);
-            await Task.Yield();
-            RebuildDataSections();
+            return Task.CompletedTask;
         }));
 
         if (!string.Equals(item.Status, DurableItemStatus.Retired.ToString(), StringComparison.OrdinalIgnoreCase))
@@ -399,6 +410,15 @@ public sealed class MainPage : ContentPage
 
         layout.Children.Add(actions);
         return Card(layout);
+    }
+
+    private void RefreshDurableDetail()
+    {
+        _durableDetailContent.Children.Clear();
+        var selected = _durableItems.FirstOrDefault(item => item.Id == _selectedDurableEntryId);
+        _durableDetailContent.Children.Add(selected is null
+            ? new Label { Text = "Open a durable item to view details." }
+            : DurableDetailCard(selected));
     }
 
     private static View DurableDetailCard(DurableItem item)
@@ -1111,6 +1131,45 @@ public sealed class MainPage : ContentPage
         _durableStorageSlotEntry.Text = string.Empty;
         _durableSaveButton.Text = "Create Durable Item";
         _durableCancelButton.IsVisible = false;
+    }
+
+    private void DetachReusableControls()
+    {
+        View[] controls =
+        [
+            _itemNameEntry,
+            _desiredAmountEntry,
+            _desiredUnitEntry,
+            _entryItemPicker,
+            _quantityEntry,
+            _unitEntry,
+            _expiryDateEntry,
+            _storageSlotEntry,
+            _durableNameEntry,
+            _durableTypeEntry,
+            _durableStatusPicker,
+            _durableLocationEntry,
+            _durableBrandEntry,
+            _durableModelEntry,
+            _durableSerialEntry,
+            _durablePurchaseDateEntry,
+            _durablePurchaseValueEntry,
+            _durableWarrantyEntry,
+            _durableDescriptionEntry,
+            _durableNotesEntry,
+            _durableStorageSlotEntry,
+            _durableSaveButton,
+            _durableCancelButton,
+            _durableDetailContent
+        ];
+
+        foreach (var control in controls)
+        {
+            if (control.Parent is Layout parent)
+            {
+                parent.Children.Remove(control);
+            }
+        }
     }
 
     private bool TryParseSelectedDurableStatus(out DurableItemStatus status)
