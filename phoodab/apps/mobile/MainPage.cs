@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using Microsoft.Maui.Layouts;
 using Phoodab.Application;
 using Phoodab.Domain;
 
@@ -338,7 +339,7 @@ public sealed class MainPage : ContentPage
 
     private void AddDurableItemsSection()
     {
-        var section = Section("Durable Items");
+        var section = Section("Equipment");
 
         if (_durableItems.Count == 0)
         {
@@ -1330,10 +1331,10 @@ public sealed class MainPage : ContentPage
     {
         return page switch
         {
-            PageId.Inventory => "Inventory",
+            PageId.Inventory => "Pantry",
             PageId.Shopping => "Shopping List",
             PageId.Locations => "Locations",
-            PageId.Durable => "Durable Items",
+            PageId.Durable => "Equipment",
             _ => "Dashboard"
         };
     }

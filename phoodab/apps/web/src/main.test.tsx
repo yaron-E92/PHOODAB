@@ -158,12 +158,12 @@ describe('pantry mvp page', () => {
     expect(container.textContent).toContain('No expiring or expired lots need attention.');
     expect(container.textContent).toContain('No replenishment needed right now.');
 
-    await goToPage(container, 'Inventory');
+    await goToPage(container, 'Pantry');
     expect(container.textContent).toContain('No inventory yet.');
     expect(container.textContent).toContain('No expiring entries.');
     expect(container.textContent).toContain('No replenishment needed.');
 
-    await goToPage(container, 'Durable Items');
+    await goToPage(container, 'Equipment');
     expect(container.textContent).toContain('No durable items.');
     expect(container.textContent).toContain('Open a durable item to view details.');
   });
@@ -251,10 +251,10 @@ describe('pantry mvp page', () => {
     });
 
     expect(container.querySelector('nav')?.textContent).toContain('Dashboard');
-    expect(container.querySelector('nav')?.textContent).toContain('Inventory');
+    expect(container.querySelector('nav')?.textContent).toContain('Pantry');
     expect(container.querySelector('nav')?.textContent).toContain('Shopping List');
     expect(container.querySelector('nav')?.textContent).toContain('Locations');
-    expect(container.querySelector('nav')?.textContent).toContain('Durable Items');
+    expect(container.querySelector('nav')?.textContent).toContain('Equipment');
     expect(container.textContent).toContain('What should I care about right now?');
     expect(container.textContent).toContain('Low-stock consumables');
     expect(container.textContent).toContain('Milk needs 5 liter');
@@ -287,7 +287,7 @@ describe('pantry mvp page', () => {
       root.render(<App />);
       await Promise.resolve();
     });
-    await goToPage(container, 'Durable Items');
+    await goToPage(container, 'Equipment');
 
     const nameInput = container.querySelector('input[aria-label="Durable item name"]') as HTMLInputElement;
     const typeInput = container.querySelector('input[aria-label="Durable item type"]') as HTMLInputElement;
@@ -358,7 +358,7 @@ describe('pantry mvp page', () => {
       root.render(<App />);
       await Promise.resolve();
     });
-    await goToPage(container, 'Durable Items');
+    await goToPage(container, 'Equipment');
 
     expect(container.textContent).toContain('Laptop: Electronics [Active]');
     expect(container.textContent).toContain('Location: Office | Warranty through 2027-01-01');
@@ -469,7 +469,7 @@ describe('pantry mvp page', () => {
       root.render(<App />);
       await Promise.resolve();
     });
-    await goToPage(container, 'Inventory');
+    await goToPage(container, 'Pantry');
 
     expect(container.textContent).toContain('Milk - 1 liter - Soon');
     expect(container.textContent).toContain('Milk: 5 liter (2 about to expire)');
@@ -512,7 +512,7 @@ describe('pantry mvp page', () => {
       root.render(<App />);
       await Promise.resolve();
     });
-    await goToPage(container, 'Inventory');
+    await goToPage(container, 'Pantry');
 
     await act(async () => {
       Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Add to Shopping List')!.click();
@@ -650,7 +650,7 @@ describe('pantry mvp page', () => {
       root.render(<App />);
       await Promise.resolve();
     });
-    await goToPage(container, 'Inventory');
+    await goToPage(container, 'Pantry');
 
     expect(container.textContent).toContain('Target amount');
     expect(container.textContent).toContain('Expiry warning days');
@@ -716,7 +716,7 @@ describe('pantry mvp page', () => {
       root.render(<App />);
       await Promise.resolve();
     });
-    await goToPage(container, 'Inventory');
+    await goToPage(container, 'Pantry');
 
     const inputs = Array.from(container.querySelectorAll('input'));
     const quantityInput = inputs.find((input) => input.getAttribute('aria-label') === 'Entry quantity for Milk')!;
@@ -769,7 +769,7 @@ describe('pantry mvp page', () => {
       root.render(<App />);
       await Promise.resolve();
     });
-    await goToPage(container, 'Inventory');
+    await goToPage(container, 'Pantry');
 
     expect(container.textContent).toContain('Lot entry-1');
     expect(container.textContent).toContain('Expiry: 2026-06-10 (Safe)');
@@ -864,7 +864,7 @@ describe('pantry mvp page', () => {
       root.render(<App />);
       await Promise.resolve();
     });
-    await goToPage(container, 'Inventory');
+    await goToPage(container, 'Pantry');
 
     const quantityInput = container.querySelector('input[aria-label="Entry quantity for Milk"]') as HTMLInputElement;
     await act(async () => {
@@ -921,7 +921,7 @@ describe('pantry mvp page', () => {
       root.render(<App />);
       await Promise.resolve();
     });
-    await goToPage(container, 'Inventory');
+    await goToPage(container, 'Pantry');
 
     expect(container.textContent).toContain('Rice: mixed units (2 entries)');
     expect(container.textContent).toContain('Mixed units cannot be totaled safely.');

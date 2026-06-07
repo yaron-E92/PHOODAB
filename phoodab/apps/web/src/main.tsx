@@ -153,10 +153,10 @@ type PageId = 'dashboard' | 'inventory' | 'shopping' | 'locations' | 'durable';
 
 const navItems: { id: PageId; label: string }[] = [
   { id: 'dashboard', label: 'Dashboard' },
-  { id: 'inventory', label: 'Inventory' },
+  { id: 'inventory', label: 'Pantry' },
   { id: 'shopping', label: 'Shopping List' },
   { id: 'locations', label: 'Locations' },
-  { id: 'durable', label: 'Durable Items' }
+  { id: 'durable', label: 'Equipment' }
 ];
 
 const cardStyle: React.CSSProperties = {
@@ -750,7 +750,7 @@ export function App() {
 
       {activePage === 'durable' && (
         <>
-      <h2>Durable Items</h2>
+      <h2>Equipment</h2>
       <form onSubmit={onSaveDurableItem}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'end' }}>
           <input
