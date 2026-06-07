@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Text.Json;
-using Microsoft.Maui.Layouts;
 using Phoodab.Application;
 using Phoodab.Domain;
 
@@ -42,8 +41,6 @@ public sealed class MainPage : ContentPage
     private readonly Button _durableSaveButton = new() { Text = "Create Durable Item" };
     private readonly Button _durableCancelButton = new() { Text = "Cancel Durable Edit", IsVisible = false };
     private readonly VerticalStackLayout _content = new() { Spacing = 16, Padding = 16 };
-    private readonly FlexLayout _navigation = new() { Direction = FlexDirection.Row, Wrap = FlexWrap.Wrap, AlignItems = FlexAlignItems.Stretch };
-    private readonly Label _pageTitleLabel = new() { FontSize = 24, FontAttributes = FontAttributes.Bold, TextColor = Colors.Black };
     private readonly VerticalStackLayout _dataContent = new() { Spacing = 16 };
 
     private readonly List<ItemOption> _createdItems = [];
@@ -56,7 +53,6 @@ public sealed class MainPage : ContentPage
     private readonly List<ReplenishmentRule> _rules = [];
 
     private bool _hasLoaded;
-    private PageId _activePage = PageId.Dashboard;
     private string? _editingDurableEntryId;
     private string? _selectedDurableEntryId;
 
@@ -98,154 +94,33 @@ public sealed class MainPage : ContentPage
         _content.Children.Clear();
         _content.Children.Add(new Label
         {
-            Text = "PHOODAB",
+            Text = "PHOODAB Pantry MVP",
             FontSize = 28,
             FontAttributes = FontAttributes.Bold,
             TextColor = Colors.Black
         });
 
-        _content.Children.Add(new Label
-        {
-            Text = "Pantry, shopping, locations, and durable inventory",
-            TextColor = Colors.DarkSlateGray
-        });
-        _content.Children.Add(_navigation);
         _content.Children.Add(Button("Refresh", async () => await LoadDataAsync()));
         _content.Children.Add(_healthLabel);
         _content.Children.Add(_versionLabel);
         _content.Children.Add(_statusLabel);
-        _content.Children.Add(_pageTitleLabel);
+
+        AddCreateItemSection();
+        AddEntrySection();
+        AddDurableFormSection();
         _content.Children.Add(_dataContent);
     }
 
     private void RebuildDataSections()
     {
-        RebuildNavigation();
-        _pageTitleLabel.Text = PageTitle(_activePage);
         _dataContent.Children.Clear();
-
-        switch (_activePage)
-        {
-            case PageId.Inventory:
-                AddCreateItemSection();
-                AddEntrySection();
-                AddInventorySummarySection();
-                AddConsumableAuditSection();
-                AddExpiringSection();
-                AddSuggestionsSection();
-                AddRulesSection();
-                break;
-            case PageId.Shopping:
-                AddShoppingSection();
-                break;
-            case PageId.Locations:
-                AddLocationsSection();
-                break;
-            case PageId.Durable:
-                AddDurableFormSection();
-                AddDurableItemsSection();
-                break;
-            default:
-                AddDashboardSection();
-                break;
-        }
-    }
-
-    private void RebuildNavigation()
-    {
-        _navigation.Children.Clear();
-
-        foreach (var page in Enum.GetValues<PageId>())
-        {
-            var isActive = _activePage == page;
-            var button = Button(PageTitle(page), () =>
-            {
-                _activePage = page;
-                RebuildDataSections();
-                return Task.CompletedTask;
-            });
-            button.BackgroundColor = isActive ? Colors.LightSeaGreen : Colors.White;
-            button.TextColor = isActive ? Colors.White : Colors.Black;
-            button.BorderColor = isActive ? Colors.LightSeaGreen : Colors.LightGray;
-            button.BorderWidth = 1;
-            button.WidthRequest = 150;
-            button.Margin = new Thickness(0, 0, 8, 8);
-            _navigation.Children.Add(button);
-        }
-    }
-
-    private void AddDashboardSection()
-    {
-        _dataContent.Children.Add(new Label
-        {
-            Text = "What should I care about right now?",
-            TextColor = Colors.DarkSlateGray
-        });
-
-        var lowStock = _suggestions.Where(suggestion => suggestion.DeficitAmount > 0).Take(4).ToList();
-        _dataContent.Children.Add(DashboardCard(
-            "Low-stock consumables",
-            lowStock.Count == 0
-                ? ["Everything with a replenishment rule has enough usable stock."]
-                : lowStock.Select(suggestion => $"{suggestion.ItemName} needs {suggestion.SuggestedPurchaseAmount.ToString(CultureInfo.InvariantCulture)} {suggestion.Unit}")));
-
-        _dataContent.Children.Add(DashboardCard(
-            "Expiring items",
-            _expiringEntries.Count == 0
-                ? ["No expiring or expired lots need attention."]
-                : _expiringEntries.Take(4).Select(entry => $"{entry.ItemName} - {entry.Quantity.ToString(CultureInfo.InvariantCulture)} {entry.Unit} - {entry.ExpiryStatus}")));
-
-        _dataContent.Children.Add(DashboardCard(
-            "Recently updated inventory",
-            _consumableEntries.Count == 0
-                ? ["No inventory lots have been recorded yet."]
-                : _consumableEntries.Take(3).Select(entry => $"{entry.ItemName} lot {entry.EntryId}: {entry.Quantity.ToString(CultureInfo.InvariantCulture)} {entry.Unit}")));
-
-        _dataContent.Children.Add(DashboardCard(
-            "Replenishment suggestions",
-            _suggestions.Count == 0
-                ? ["No replenishment needed right now."]
-                : _suggestions.Take(4).Select(suggestion => $"{suggestion.ItemName}: Buy {suggestion.SuggestedPurchaseAmount.ToString(CultureInfo.InvariantCulture)} {suggestion.Unit}")));
-
-        var shoppingActions = _shoppingListItems
-            .Where(item => ShoppingStatus(item) is "ShoppingList" or "InCart" or "StockUpdateNeeded")
-            .Take(4)
-            .ToList();
-        _dataContent.Children.Add(DashboardCard(
-            "Shopping actions",
-            shoppingActions.Count == 0
-                ? ["No shopping list or cart items need action."]
-                : shoppingActions.Select(item => $"{item.ItemName}: {item.Quantity.ToString(CultureInfo.InvariantCulture)} {item.Unit} [{ShoppingStatusLabel(item)}]")));
-    }
-
-    private void AddLocationsSection()
-    {
-        var section = Section("Locations");
-        var rows = _consumableEntries
-            .Where(entry => !string.IsNullOrWhiteSpace(entry.StorageSlotId))
-            .Select(entry => ($"Location: {entry.StorageSlotId}", $"{entry.ItemName} lot {entry.EntryId}", $"{entry.Quantity.ToString(CultureInfo.InvariantCulture)} {entry.Unit}"))
-            .Concat(_durableItems
-                .Where(item => !string.IsNullOrWhiteSpace(item.CurrentLocation) || !string.IsNullOrWhiteSpace(item.StorageSlotId))
-                .Select(item => ($"Location: {DurableLocation(item)}", item.DisplayName, $"{DurableType(item)} [{item.Status}]")))
-            .ToList();
-
-        if (rows.Count == 0)
-        {
-            section.Children.Add(new Label { Text = "No inventory or durable items have assigned locations yet." });
-        }
-        else
-        {
-            foreach (var row in rows)
-            {
-                var layout = new VerticalStackLayout { Spacing = 4 };
-                layout.Children.Add(new Label { Text = row.Item1, FontAttributes = FontAttributes.Bold });
-                layout.Children.Add(new Label { Text = row.Item2 });
-                layout.Children.Add(new Label { Text = row.Item3, TextColor = Colors.DarkSlateGray });
-                section.Children.Add(Card(layout));
-            }
-        }
-
-        _dataContent.Children.Add(section);
+        AddDurableItemsSection();
+        AddInventorySummarySection();
+        AddConsumableAuditSection();
+        AddExpiringSection();
+        AddSuggestionsSection();
+        AddRulesSection();
+        AddShoppingSection();
     }
 
     private async Task LoadDataAsync()
@@ -302,7 +177,7 @@ public sealed class MainPage : ContentPage
         section.Children.Add(_desiredAmountEntry);
         section.Children.Add(_desiredUnitEntry);
         section.Children.Add(Button("Create Item", CreateItemAsync));
-        _dataContent.Children.Add(section);
+        _content.Children.Add(section);
     }
 
     private void AddEntrySection()
@@ -316,7 +191,7 @@ public sealed class MainPage : ContentPage
         section.Children.Add(_expiryDateEntry);
         section.Children.Add(_storageSlotEntry);
         section.Children.Add(Button("Add Entry", AddConsumableEntryAsync));
-        _dataContent.Children.Add(section);
+        _content.Children.Add(section);
     }
 
     private void AddDurableFormSection()
@@ -334,12 +209,12 @@ public sealed class MainPage : ContentPage
         section.Children.Add(_durableStorageSlotEntry);
         section.Children.Add(_durableSaveButton);
         section.Children.Add(_durableCancelButton);
-        _dataContent.Children.Add(section);
+        _content.Children.Add(section);
     }
 
     private void AddDurableItemsSection()
     {
-        var section = Section("Equipment");
+        var section = Section("Durable Items");
 
         if (_durableItems.Count == 0)
         {
@@ -379,16 +254,17 @@ public sealed class MainPage : ContentPage
         layout.Children.Add(new Label { Text = $"Location: {location} | {WarrantyIndicator(item)}" });
 
         var actions = new HorizontalStackLayout { Spacing = 8 };
-        actions.Children.Add(Button("Open Details", () =>
+        actions.Children.Add(Button("Open Details", async () =>
         {
             _selectedDurableEntryId = item.Id;
+            await Task.Yield();
             RebuildDataSections();
-            return Task.CompletedTask;
         }));
-        actions.Children.Add(Button("Edit", () =>
+        actions.Children.Add(Button("Edit", async () =>
         {
             StartDurableEdit(item);
-            return Task.CompletedTask;
+            await Task.Yield();
+            RebuildDataSections();
         }));
 
         if (!string.Equals(item.Status, DurableItemStatus.Retired.ToString(), StringComparison.OrdinalIgnoreCase))
@@ -1090,7 +966,6 @@ public sealed class MainPage : ContentPage
         _durableStorageSlotEntry.Text = item.StorageSlotId;
         _durableSaveButton.Text = "Save Durable Item";
         _durableCancelButton.IsVisible = true;
-        RebuildDataSections();
     }
 
     private void ClearDurableForm()
@@ -1279,19 +1154,6 @@ public sealed class MainPage : ContentPage
         };
     }
 
-    private static View DashboardCard(string title, IEnumerable<string> rows)
-    {
-        var layout = new VerticalStackLayout { Spacing = 6 };
-        layout.Children.Add(new Label { Text = title, FontAttributes = FontAttributes.Bold });
-
-        foreach (var row in rows)
-        {
-            layout.Children.Add(new Label { Text = row });
-        }
-
-        return Card(layout);
-    }
-
     private static Button Button(string text, Func<Task> action)
     {
         var button = new Button { Text = text };
@@ -1325,18 +1187,6 @@ public sealed class MainPage : ContentPage
         grid.Add(left, 0);
         grid.Add(right, 1);
         return grid;
-    }
-
-    private static string PageTitle(PageId page)
-    {
-        return page switch
-        {
-            PageId.Inventory => "Pantry",
-            PageId.Shopping => "Shopping List",
-            PageId.Locations => "Locations",
-            PageId.Durable => "Equipment",
-            _ => "Dashboard"
-        };
     }
 
     private static string ShoppingStatus(ShoppingListItem item)
@@ -1534,13 +1384,4 @@ public sealed class MainPage : ContentPage
         List<ReplenishmentSuggestion> Suggestions,
         List<ShoppingListItem> ShoppingListItems,
         List<ReplenishmentRule> Rules);
-
-    private enum PageId
-    {
-        Dashboard,
-        Inventory,
-        Shopping,
-        Locations,
-        Durable
-    }
 }
