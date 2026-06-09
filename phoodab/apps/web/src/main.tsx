@@ -36,6 +36,10 @@ const baseUrl = 'http://localhost:5199';
 
 type EntryEdit = { quantity: string; unit: string; expiresOn: string; storageSlotId: string };
 type EntryActionEdit = { addStock: string; addStockUnit: string; consumeStock: string; consumeStockUnit: string };
+type ItemRoute =
+  | { kind: 'inventory' }
+  | { kind: 'consumable'; itemDefinitionId: string }
+  | { kind: 'durable'; entryId: string };
 type DurableItemForm = {
   displayName: string;
   description: string;
@@ -53,6 +57,15 @@ type DurableItemForm = {
 };
 
 const durableStatuses: DurableItemStatus[] = ['Active', 'NeedsRepair', 'LoanedOut', 'Stored', 'Retired', 'Lost'];
+
+const getItemRoute = (pathname: string): ItemRoute => {
+  const match = pathname.match(/^\/items\/(consumable|durable)\/([^/]+)\/?$/);
+  if (!match) return { kind: 'inventory' };
+
+  return match[1] === 'consumable'
+    ? { kind: 'consumable', itemDefinitionId: decodeURIComponent(match[2]) }
+    : { kind: 'durable', entryId: decodeURIComponent(match[2]) };
+};
 
 const emptyDurableItemForm: DurableItemForm = {
   displayName: '',
@@ -149,29 +162,10 @@ const getShoppingStatusLabel = (item: ShoppingListItem) => {
   }
 };
 
-type PageId = 'dashboard' | 'inventory' | 'shopping' | 'locations' | 'durable';
-
-const navItems: { id: PageId; label: string }[] = [
-  { id: 'dashboard', label: 'Dashboard' },
-  { id: 'inventory', label: 'Pantry' },
-  { id: 'shopping', label: 'Shopping List' },
-  { id: 'locations', label: 'Locations' },
-  { id: 'durable', label: 'Equipment' }
-];
-
-const cardStyle: React.CSSProperties = {
-  border: '1px solid #d4d4d8',
-  borderRadius: 8,
-  padding: 16,
-  background: '#fff'
-};
-
-const mutedTextStyle: React.CSSProperties = { color: '#52525b' };
-
 export function App() {
-  const [activePage, setActivePage] = useState<PageId>('dashboard');
   const [health, setHealth] = useState<string>('loading');
   const [version, setVersion] = useState<string>('loading');
+  const [route, setRoute] = useState<ItemRoute>(() => getItemRoute(window.location.pathname));
 
   const [itemName, setItemName] = useState('');
   const [desiredAmount, setDesiredAmount] = useState('');
@@ -314,20 +308,14 @@ export function App() {
     }
   };
 
-  const onOpenDurableItem = async (item: DurableItem) => {
+  const navigate = (path: string) => {
+    window.history.pushState({}, '', path);
+    setRoute(getItemRoute(path));
+  };
+
+  const onOpenDurableItem = (item: DurableItem) => {
     if (!item.id) return;
-
-    setDurableDetailLoading(true);
-    setError(null);
-
-    try {
-      const detail = await getDurableItem(baseUrl, item.id);
-      setSelectedDurableItem(detail);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setDurableDetailLoading(false);
-    }
+    navigate(`/items/durable/${encodeURIComponent(item.id)}`);
   };
 
   const onEditDurableItem = (item: DurableItem) => {
@@ -361,6 +349,36 @@ export function App() {
     getVersion(baseUrl).then((r) => setVersion(r.version)).catch((e) => setVersion(String(e)));
     loadData();
   }, []);
+
+  useEffect(() => {
+    const onPopState = () => setRoute(getItemRoute(window.location.pathname));
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  useEffect(() => {
+    if (route.kind !== 'durable') return;
+
+    let isCurrent = true;
+    setDurableDetailLoading(true);
+    setSelectedDurableItem(null);
+    setError(null);
+
+    getDurableItem(baseUrl, route.entryId)
+      .then((detail) => {
+        if (isCurrent) setSelectedDurableItem(detail);
+      })
+      .catch((e) => {
+        if (isCurrent) setError(String(e));
+      })
+      .finally(() => {
+        if (isCurrent) setDurableDetailLoading(false);
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [route]);
 
   const onCreateItem = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -536,178 +554,277 @@ export function App() {
     clearEntryError(entry.entryId);
   };
 
-  const selectedDurableDetail = selectedDurableItem?.id
-    ? durableItems.find((item) => item.id === selectedDurableItem.id) ?? selectedDurableItem
-    : selectedDurableItem;
-  const activePageTitle = navItems.find((item) => item.id === activePage)?.label ?? 'Dashboard';
-  const lowStockSuggestions = suggestions.filter((suggestion) => suggestion.deficitAmount > 0);
-  const recentInventoryEntries = consumableEntries.slice(0, 3);
-  const shoppingActionItems = shoppingListItems.filter((item) => {
-    const status = getShoppingStatus(item);
-    return status === 'ShoppingList' || status === 'InCart' || status === 'StockUpdateNeeded';
-  });
-  const locationRows = [
-    ...consumableEntries
-      .filter((entry) => entry.storageSlotId)
-      .map((entry) => ({
-        id: `consumable-${entry.entryId}`,
-        location: entry.storageSlotId!,
-        label: `${entry.itemName} lot ${entry.entryId}`,
-        detail: `${entry.quantity} ${entry.unit}`
-      })),
-    ...durableItems
-      .filter((item) => item.currentLocation || item.storageSlotId)
-      .map((item) => ({
-        id: `durable-${item.id ?? item.itemDefinitionId ?? getDurableDisplayName(item)}`,
-        location: item.currentLocation || item.storageSlotId || 'No location set',
-        label: getDurableDisplayName(item),
-        detail: `${item.itemType || 'Durable item'} [${item.status}]`
-      }))
-  ];
+  const selectedDurableDetail = selectedDurableItem;
+  const renderDurableEditor = () => (
+    <form onSubmit={onSaveDurableItem} aria-label="Edit durable item">
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'end', marginTop: 12 }}>
+        <input
+          aria-label="Durable item name"
+          placeholder="Durable item name"
+          value={durableForm.displayName}
+          onChange={(e) => setDurableFormField('displayName', e.target.value)}
+        />
+        <input
+          aria-label="Durable item type"
+          placeholder="Category or type"
+          value={durableForm.itemType}
+          onChange={(e) => setDurableFormField('itemType', e.target.value)}
+        />
+        <select
+          aria-label="Durable item status"
+          value={durableForm.status}
+          onChange={(e) => setDurableFormField('status', e.target.value as DurableItemStatus)}
+        >
+          {durableStatuses.map((status) => <option key={status} value={status}>{status}</option>)}
+        </select>
+        <input
+          aria-label="Durable item location"
+          placeholder="Location"
+          value={durableForm.currentLocation}
+          onChange={(e) => setDurableFormField('currentLocation', e.target.value)}
+        />
+        <input
+          aria-label="Durable item brand"
+          placeholder="Brand / manufacturer"
+          value={durableForm.brandManufacturer}
+          onChange={(e) => setDurableFormField('brandManufacturer', e.target.value)}
+        />
+        <input
+          aria-label="Durable item model"
+          placeholder="Model"
+          value={durableForm.model}
+          onChange={(e) => setDurableFormField('model', e.target.value)}
+        />
+        <input
+          aria-label="Durable item serial number"
+          placeholder="Serial number"
+          value={durableForm.serialNumber}
+          onChange={(e) => setDurableFormField('serialNumber', e.target.value)}
+        />
+        <input
+          aria-label="Durable item purchase date"
+          type="date"
+          value={durableForm.purchaseDate}
+          onChange={(e) => setDurableFormField('purchaseDate', e.target.value)}
+        />
+        <input
+          aria-label="Durable item purchase value"
+          placeholder="Purchase value"
+          type="number"
+          step="any"
+          value={durableForm.purchaseValue}
+          onChange={(e) => setDurableFormField('purchaseValue', e.target.value)}
+        />
+        <input
+          aria-label="Durable item warranty end"
+          type="date"
+          value={durableForm.warrantyEndsOn}
+          onChange={(e) => setDurableFormField('warrantyEndsOn', e.target.value)}
+        />
+        <input
+          aria-label="Durable item storage slot"
+          placeholder="Storage slot ID (optional)"
+          value={durableForm.storageSlotId}
+          onChange={(e) => setDurableFormField('storageSlotId', e.target.value)}
+        />
+        <input
+          aria-label="Durable item description"
+          placeholder="Description"
+          value={durableForm.description}
+          onChange={(e) => setDurableFormField('description', e.target.value)}
+        />
+        <input
+          aria-label="Durable item notes"
+          placeholder="Notes"
+          value={durableForm.notes}
+          onChange={(e) => setDurableFormField('notes', e.target.value)}
+        />
+        <button type="submit">Save Durable Item</button>
+        <button type="button" onClick={onCancelDurableEdit}>Cancel Durable Edit</button>
+      </div>
+    </form>
+  );
+
+  if (route.kind === 'consumable') {
+    const item = summary.find((candidate) => candidate.itemDefinitionId === route.itemDefinitionId);
+    const lots = consumableEntries.filter((entry) => entry.itemDefinitionId === route.itemDefinitionId);
+    const rule = rules.find((candidate) => candidate.itemDefinitionId === route.itemDefinitionId);
+    const suggestion = suggestions.find((candidate) => candidate.itemDefinitionId === route.itemDefinitionId);
+    const shoppingItems = shoppingListItems.filter((candidate) => candidate.itemDefinitionId === route.itemDefinitionId);
+    const activeShoppingItem = shoppingItems.find((candidate) => !candidate.isPurchased);
+    const itemName = item?.itemName ?? lots[0]?.itemName ?? suggestion?.itemName ?? 'Consumable item';
+    const locations = [...new Set(lots.map((lot) => lot.storageSlotId).filter((location): location is string => Boolean(location)))];
+
+    return (
+      <main style={{ fontFamily: 'system-ui', padding: 16 }}>
+        <button onClick={() => navigate('/')} aria-label="Back to inventory">Back to Inventory</button>
+        <section aria-label={`Consumable item detail for ${itemName}`} style={{ marginTop: 16 }}>
+          <span style={{ background: '#dcfce7', color: '#166534', padding: '4px 8px', borderRadius: 12, fontWeight: 700 }}>Consumable</span>
+          <h1>{itemName}</h1>
+          {isLoading && <p>Loading consumable item detail...</p>}
+          {!isLoading && !item && lots.length === 0 && <p>Consumable item not found.</p>}
+          {!isLoading && (item || lots.length > 0) && (
+            <>
+              <h2>Current Amount</h2>
+              <p>
+                {item?.hasMixedUnits
+                  ? `Mixed units across ${item.entryCount} lots`
+                  : `${item?.totalQuantity ?? lots.reduce((total, lot) => total + lot.quantity, 0)} ${item?.unit ?? lots[0]?.unit ?? ''}`}
+              </p>
+              {item?.mixedUnitWarning && <p style={{ color: '#9a3412' }}>{item.mixedUnitWarning}</p>}
+
+              <h2>Locations</h2>
+              <p>{locations.length > 0 ? locations.join(', ') : 'No location set'}</p>
+
+              <h2>Lots / Batches</h2>
+              {lots.length === 0 && <p>No lots recorded.</p>}
+              {lots.map((entry) => {
+                const edit = entryEdits[entry.entryId] ?? toEntryEdit(entry);
+                const actionEdit = entryActionEdits[entry.entryId] ?? toEntryActionEdit(entry);
+                return (
+                  <article key={entry.entryId} style={{ ...getExpiryStyle(entry.expiryStatus), padding: 12, marginBottom: 12 }}>
+                    <strong>Lot {entry.entryId}</strong>
+                    <div>Quantity: {entry.quantity} {entry.unit}</div>
+                    <div>Expiry: {entry.expiresOn ?? 'No expiry'} ({entry.expiryStatus})</div>
+                    <div>Location: {entry.storageSlotId || 'No location set'}</div>
+                    {entryErrors[entry.entryId] && <p role="alert">{entryErrors[entry.entryId]}</p>}
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+                      <label>
+                        Consume stock
+                        <input
+                          aria-label={`Consume stock amount for ${entry.itemName} lot ${entry.entryId}`}
+                          type="number"
+                          step="any"
+                          min={0}
+                          value={actionEdit.consumeStock}
+                          onChange={(e) => setEntryActionEdit(entry.entryId, { consumeStock: e.target.value })}
+                        />
+                      </label>
+                      <label>
+                        Consume stock unit
+                        <input
+                          aria-label={`Consume stock unit for ${entry.itemName} lot ${entry.entryId}`}
+                          value={actionEdit.consumeStockUnit}
+                          onChange={(e) => setEntryActionEdit(entry.entryId, { consumeStockUnit: e.target.value })}
+                        />
+                      </label>
+                      <button onClick={() => onConsumeStock(entry)}>Consume Stock</button>
+                      <button onClick={() => onMarkLotDepleted(entry)}>Mark Lot Depleted</button>
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+                      <input
+                        aria-label={`Entry quantity for ${entry.itemName}`}
+                        type="number"
+                        step="any"
+                        min={0}
+                        value={edit.quantity}
+                        onChange={(e) => setEntryEdit(entry.entryId, { quantity: e.target.value })}
+                      />
+                      <input aria-label={`Entry unit for ${entry.itemName}`} value={edit.unit} onChange={(e) => setEntryEdit(entry.entryId, { unit: e.target.value })} />
+                      <input aria-label={`Entry expiry for ${entry.itemName}`} type="date" value={edit.expiresOn} onChange={(e) => setEntryEdit(entry.entryId, { expiresOn: e.target.value })} />
+                      <input aria-label={`Entry storage slot for ${entry.itemName}`} value={edit.storageSlotId} onChange={(e) => setEntryEdit(entry.entryId, { storageSlotId: e.target.value })} />
+                      <button onClick={() => onSaveConsumableEntry(entry)}>Adjust Quantity / Expiry / Location</button>
+                      <button onClick={() => onResetEntryEdit(entry)}>Undo Unsaved Changes</button>
+                    </div>
+                  </article>
+                );
+              })}
+
+              <h2>Replenishment Rule</h2>
+              {!rule && <p>No replenishment rule configured.</p>}
+              {rule && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'end' }}>
+                  <label>
+                    Target amount
+                    <input aria-label={`Target amount for ${itemName}`} type="number" step="any" value={rule.desiredAmount} onChange={(e) => setRules((current) => current.map((candidate) => candidate.id === rule.id ? { ...candidate, desiredAmount: Number(e.target.value) } : candidate))} />
+                  </label>
+                  <label>
+                    Target unit
+                    <input aria-label={`Target unit for ${itemName}`} value={rule.desiredUnit} onChange={(e) => setRules((current) => current.map((candidate) => candidate.id === rule.id ? { ...candidate, desiredUnit: e.target.value } : candidate))} />
+                  </label>
+                  <label>
+                    Expiry warning days
+                    <input aria-label={`Expiry warning days for ${itemName}`} type="number" min={0} value={rule.expiryWarningDays} onChange={(e) => setRules((current) => current.map((candidate) => candidate.id === rule.id ? { ...candidate, expiryWarningDays: Number(e.target.value) } : candidate))} />
+                  </label>
+                  <label>
+                    Disabled
+                    <input aria-label={`Disable replenishment rule for ${itemName}`} type="checkbox" checked={rule.isDisabled} onChange={(e) => setRules((current) => current.map((candidate) => candidate.id === rule.id ? { ...candidate, isDisabled: e.target.checked } : candidate))} />
+                  </label>
+                  <button aria-label={`Save replenishment rule for ${itemName}`} onClick={() => onSaveRule(rule)}>Save Rule</button>
+                </div>
+              )}
+
+              <h2>Shopping Suggestion</h2>
+              {suggestion ? (
+                <div>
+                  <p>Suggested purchase: {suggestion.suggestedPurchaseAmount} {suggestion.unit}</p>
+                  <p>Deficit: {suggestion.deficitAmount} {suggestion.unit}; expiring soon: {suggestion.expiringSoonAmount} {suggestion.unit}</p>
+                  {activeShoppingItem ? (
+                    <p>State: {getShoppingStatusLabel(activeShoppingItem)}</p>
+                  ) : (
+                    <button onClick={() => onCreateFromSuggestion(suggestion)}>Add to Shopping List</button>
+                  )}
+                </div>
+              ) : shoppingItems.length > 0 ? (
+                <p>State: {shoppingItems.map(getShoppingStatusLabel).join(', ')}</p>
+              ) : (
+                <p>No active shopping suggestion.</p>
+              )}
+            </>
+          )}
+        </section>
+      </main>
+    );
+  }
+
+  if (route.kind === 'durable') {
+    const name = selectedDurableDetail ? getDurableDisplayName(selectedDurableDetail) : 'Durable item';
+    return (
+      <main style={{ fontFamily: 'system-ui', padding: 16 }}>
+        <button onClick={() => navigate('/')} aria-label="Back to inventory">Back to Inventory</button>
+        <section aria-label={`Durable item detail for ${name}`} style={{ marginTop: 16 }}>
+          <span style={{ background: '#dbeafe', color: '#1e40af', padding: '4px 8px', borderRadius: 12, fontWeight: 700 }}>Durable</span>
+          <h1>{name}</h1>
+          {durableDetailLoading && <p>Loading durable item detail...</p>}
+          {!durableDetailLoading && !selectedDurableDetail && !error && <p>Durable item not found.</p>}
+          {error && <p>Error: {error}</p>}
+          {!durableDetailLoading && selectedDurableDetail && (
+            <>
+              <h2>Identity</h2>
+              <div>Type: {selectedDurableDetail.itemType || 'Uncategorized'}</div>
+              <div>Description: {selectedDurableDetail.description || 'Not recorded'}</div>
+              <div>Brand / manufacturer: {selectedDurableDetail.brandManufacturer || 'Not recorded'}</div>
+              <div>Model: {selectedDurableDetail.model || 'Not recorded'}</div>
+              <div>Serial number: {selectedDurableDetail.serialNumber || 'Not recorded'}</div>
+              <h2>Status and Location</h2>
+              <div>Status: {selectedDurableDetail.status}</div>
+              <div>Location: {selectedDurableDetail.currentLocation || selectedDurableDetail.storageSlotId || 'No location set'}</div>
+              <h2>Purchase and Warranty</h2>
+              <div>Purchase date: {selectedDurableDetail.purchaseDate || 'Not recorded'}</div>
+              <div>Purchase value: {selectedDurableDetail.purchaseValue ?? 'Not recorded'}</div>
+              <div>{getWarrantyIndicator(selectedDurableDetail)}</div>
+              <h2>Notes</h2>
+              <p>Notes: {selectedDurableDetail.notes || 'No notes recorded'}</p>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button aria-label={`Edit durable item ${name}`} onClick={() => onEditDurableItem(selectedDurableDetail)}>Edit Durable Item</button>
+                {selectedDurableDetail.status !== 'Retired' && (
+                  <button aria-label={`Retire durable item ${name}`} onClick={() => onRetireDurableItem(selectedDurableDetail)}>Retire Durable Item</button>
+                )}
+              </div>
+              {editingDurableItemId === selectedDurableDetail.id && renderDurableEditor()}
+            </>
+          )}
+        </section>
+      </main>
+    );
+  }
 
   return (
-    <main style={{ fontFamily: 'system-ui', minHeight: '100vh', background: '#f4f4f5', color: '#18181b' }}>
-      <style>
-        {`
-          @media (max-width: 720px) {
-            .app-header {
-              align-items: stretch;
-            }
-            .app-nav {
-              grid-template-columns: repeat(2, minmax(0, 1fr));
-            }
-            .dashboard-grid {
-              grid-template-columns: 1fr;
-            }
-          }
-        `}
-      </style>
-      <header
-        className="app-header"
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 16,
-          padding: '20px 24px',
-          background: '#fff',
-          borderBottom: '1px solid #d4d4d8'
-        }}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', alignItems: 'end' }}>
-          <div>
-            <h1 style={{ margin: 0 }}>PHOODAB</h1>
-            <p style={{ ...mutedTextStyle, margin: '4px 0 0' }}>Pantry, shopping, locations, and durable inventory</p>
-          </div>
-          <div style={{ ...mutedTextStyle, fontSize: 14 }}>
-            Health: {health} | Version: {version}
-          </div>
-        </div>
-        <nav className="app-nav" aria-label="Primary" style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 8 }}>
-          {navItems.map((item) => {
-            const isActive = activePage === item.id;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                aria-current={isActive ? 'page' : undefined}
-                onClick={() => setActivePage(item.id)}
-                style={{
-                  border: `1px solid ${isActive ? '#0f766e' : '#d4d4d8'}`,
-                  borderRadius: 8,
-                  padding: '10px 12px',
-                  background: isActive ? '#ccfbf1' : '#fff',
-                  color: '#18181b',
-                  fontWeight: isActive ? 700 : 500,
-                  cursor: 'pointer'
-                }}
-              >
-                {item.label}
-              </button>
-            );
-          })}
-        </nav>
-      </header>
-      <section style={{ padding: 24 }}>
-        <h2 id="page-title" style={{ marginTop: 0 }}>{activePageTitle}</h2>
-        {activePage === 'dashboard' && (
-          <>
-            <p style={mutedTextStyle}>What should I care about right now?</p>
-            {isLoading && <p>Loading pantry data...</p>}
-            {error && <p>Error: {error}</p>}
-            {!isLoading && !error && (
-              <div className="dashboard-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
-                <section style={cardStyle}>
-                  <h3>Low-stock consumables</h3>
-                  {lowStockSuggestions.length === 0 && <p>Everything with a replenishment rule has enough usable stock.</p>}
-                  {lowStockSuggestions.length > 0 && (
-                    <ul>
-                      {lowStockSuggestions.slice(0, 4).map((suggestion) => (
-                        <li key={suggestion.itemDefinitionId}>
-                          {suggestion.itemName} needs {suggestion.suggestedPurchaseAmount} {suggestion.unit}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </section>
-                <section style={cardStyle}>
-                  <h3>Expiring items</h3>
-                  {expiringEntries.length === 0 && <p>No expiring or expired lots need attention.</p>}
-                  {expiringEntries.length > 0 && (
-                    <ul>
-                      {expiringEntries.slice(0, 4).map((entry) => (
-                        <li key={entry.entryId}>
-                          {entry.itemName} - {entry.quantity} {entry.unit} - {entry.expiryStatus}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </section>
-                <section style={cardStyle}>
-                  <h3>Recently updated inventory</h3>
-                  {recentInventoryEntries.length === 0 && <p>No inventory lots have been recorded yet.</p>}
-                  {recentInventoryEntries.length > 0 && (
-                    <ul>
-                      {recentInventoryEntries.map((entry) => (
-                        <li key={entry.entryId}>
-                          {entry.itemName} lot {entry.entryId}: {entry.quantity} {entry.unit}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </section>
-                <section style={cardStyle}>
-                  <h3>Replenishment suggestions</h3>
-                  {suggestions.length === 0 && <p>No replenishment needed right now.</p>}
-                  {suggestions.length > 0 && (
-                    <ul>
-                      {suggestions.slice(0, 4).map((suggestion) => (
-                        <li key={suggestion.itemDefinitionId}>
-                          {suggestion.itemName}: Buy {suggestion.suggestedPurchaseAmount} {suggestion.unit}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </section>
-                <section style={cardStyle}>
-                  <h3>Shopping actions</h3>
-                  {shoppingActionItems.length === 0 && <p>No shopping list or cart items need action.</p>}
-                  {shoppingActionItems.length > 0 && (
-                    <ul>
-                      {shoppingActionItems.slice(0, 4).map((item) => (
-                        <li key={item.id}>
-                          {item.itemName}: {item.quantity} {item.unit} [{getShoppingStatusLabel(item)}]
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </section>
-              </div>
-            )}
-          </>
-        )}
+    <main style={{ fontFamily: 'system-ui', padding: 16 }}>
+      <h1>PHOODAB Pantry MVP</h1>
+      <p>Health: {health}</p>
+      <p>Version: {version}</p>
 
-      {activePage === 'inventory' && (
-        <>
       <h2>Create Consumable Item</h2>
       <form onSubmit={onCreateItem}>
         <input placeholder="Item name" value={itemName} onChange={(e) => setItemName(e.target.value)} />
@@ -745,12 +862,8 @@ export function App() {
         <input placeholder="Storage slot ID (optional)" value={storageSlotId} onChange={(e) => setStorageSlotId(e.target.value)} />
         <button type="submit">Add Entry</button>
       </form>
-        </>
-      )}
 
-      {activePage === 'durable' && (
-        <>
-      <h2>Equipment</h2>
+      <h2>Durable Items</h2>
       <form onSubmit={onSaveDurableItem}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'end' }}>
           <input
@@ -862,30 +975,7 @@ export function App() {
           })}
         </ul>
       )}
-      <h3>Durable Item Detail</h3>
-      {durableDetailLoading && <p>Loading durable item detail...</p>}
-      {!durableDetailLoading && !selectedDurableDetail && <p>Open a durable item to view details.</p>}
-      {!durableDetailLoading && selectedDurableDetail && (
-        <section aria-label={`Durable item detail for ${getDurableDisplayName(selectedDurableDetail)}`}>
-          <strong>{getDurableDisplayName(selectedDurableDetail)}</strong>
-          <div>Type: {selectedDurableDetail.itemType || 'Uncategorized'}</div>
-          <div>Status: {selectedDurableDetail.status}</div>
-          <div>Location: {selectedDurableDetail.currentLocation || selectedDurableDetail.storageSlotId || 'No location set'}</div>
-          <div>Brand / manufacturer: {selectedDurableDetail.brandManufacturer || 'Not recorded'}</div>
-          <div>Model: {selectedDurableDetail.model || 'Not recorded'}</div>
-          <div>Serial number: {selectedDurableDetail.serialNumber || 'Not recorded'}</div>
-          <div>Purchase date: {selectedDurableDetail.purchaseDate || 'Not recorded'}</div>
-          <div>Purchase value: {selectedDurableDetail.purchaseValue ?? 'Not recorded'}</div>
-          <div>{getWarrantyIndicator(selectedDurableDetail)}</div>
-          <div>Description: {selectedDurableDetail.description || 'Not recorded'}</div>
-          <div>Notes: {selectedDurableDetail.notes || 'Not recorded'}</div>
-        </section>
-      )}
-        </>
-      )}
 
-      {activePage === 'inventory' && (
-        <>
       <h2>Inventory Summary</h2>
       {isLoading && <p>Loading pantry data...</p>}
       {error && <p>Error: {error}</p>}
@@ -898,6 +988,13 @@ export function App() {
                 ? `${item.itemName}: mixed units (${item.entryCount} entries)`
                 : `${item.itemName}: ${item.totalQuantity} ${item.unit ?? ''} (${item.entryCount} entries)`}
               {item.mixedUnitWarning && <strong style={{ color: '#9a3412', marginLeft: 8 }}>{item.mixedUnitWarning}</strong>}
+              <button
+                aria-label={`Open consumable item ${item.itemName}`}
+                style={{ marginLeft: 8 }}
+                onClick={() => navigate(`/items/consumable/${encodeURIComponent(item.itemDefinitionId)}`)}
+              >
+                Open Details
+              </button>
             </li>
           ))}
         </ul>
@@ -1107,28 +1204,7 @@ export function App() {
           })}
         </ul>
       )}
-        </>
-      )}
 
-      {activePage === 'locations' && (
-        <>
-          {!isLoading && !error && locationRows.length === 0 && <p>No inventory or durable items have assigned locations yet.</p>}
-          {!isLoading && !error && locationRows.length > 0 && (
-            <ul>
-              {locationRows.map((row) => (
-                <li key={row.id} style={{ marginBottom: 12 }}>
-                  <strong>{row.location}</strong>
-                  <div>{row.label}</div>
-                  <div style={mutedTextStyle}>{row.detail}</div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </>
-      )}
-
-      {activePage === 'shopping' && (
-        <>
       <h2>Shopping List</h2>
       {!isLoading && !error && shoppingListItems.length === 0 && <p>No shopping items.</p>}
       {!isLoading && !error && shoppingListItems.length > 0 && (
@@ -1162,15 +1238,15 @@ export function App() {
           })}
         </ul>
       )}
-        </>
-      )}
-      </section>
     </main>
   );
 }
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
-);
+const rootElement = document.getElementById('root');
+if (rootElement) {
+  ReactDOM.createRoot(rootElement).render(
+    <React.StrictMode>
+      <App />
+    </React.StrictMode>
+  );
+}
