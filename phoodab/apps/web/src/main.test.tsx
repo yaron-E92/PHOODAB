@@ -12,6 +12,7 @@ const getReplenishmentRulesMock = vi.fn();
 const getShoppingListItemsMock = vi.fn();
 const getDurableItemsMock = vi.fn();
 const getDurableItemMock = vi.fn();
+const searchPhoodabMock = vi.fn();
 const createConsumableItemMock = vi.fn().mockResolvedValue({ id: 'item-1', name: 'Milk', kind: 'Consumable' });
 const createDurableItemMock = vi.fn();
 const addConsumableEntryMock = vi.fn();
@@ -44,6 +45,7 @@ vi.mock('../../../packages/api-client/src/client', () => ({
   getShoppingListItems: getShoppingListItemsMock,
   getDurableItems: getDurableItemsMock,
   getDurableItem: getDurableItemMock,
+  searchPhoodab: searchPhoodabMock,
   createConsumableItem: createConsumableItemMock,
   createDurableItem: createDurableItemMock,
   addConsumableEntry: addConsumableEntryMock,
@@ -69,6 +71,7 @@ describe('pantry mvp page', () => {
     getReplenishmentRulesMock.mockResolvedValue([]);
     getShoppingListItemsMock.mockResolvedValue([]);
     getDurableItemsMock.mockResolvedValue([]);
+    searchPhoodabMock.mockResolvedValue([]);
     getDurableItemMock.mockResolvedValue({
       id: 'durable-1',
       itemDefinitionId: 'definition-1',
@@ -137,6 +140,91 @@ describe('pantry mvp page', () => {
       notes: 'Assigned to desk',
       storageSlotId: null
     });
+  });
+
+  it('searches globally, labels mixed results, and opens item details with the keyboard-friendly control', async () => {
+    searchPhoodabMock.mockResolvedValue([
+      { kind: 'consumable', typeLabel: 'Consumable', id: 'item-1', title: 'Milk', location: null, state: null },
+      { kind: 'location', typeLabel: 'Location', id: 'Office', title: 'Office', location: null, state: null }
+    ]);
+    const { App } = await import('./main');
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<App />);
+      await Promise.resolve();
+    });
+
+    const searchInput = container.querySelector<HTMLInputElement>('input[aria-label="Search PHOODAB"]')!;
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: '/' }));
+    });
+    expect(document.activeElement).toBe(searchInput);
+
+    await act(async () => {
+      setControlValue(searchInput, 'milk');
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Search')!.click();
+      await Promise.resolve();
+    });
+
+    expect(searchPhoodabMock).toHaveBeenCalledWith('http://localhost:5199', 'milk');
+    expect(container.textContent).toContain('Milk [Consumable]');
+    expect(container.textContent).toContain('Office [Location]');
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('button[aria-label="Open Consumable Milk"]')!.click();
+    });
+    expect(window.location.pathname).toBe('/items/consumable/item-1');
+  });
+
+  it('filters inventory, durable items, expiry, location, and shopping state', async () => {
+    getDurableItemsMock.mockResolvedValue([
+      { id: 'durable-1', itemDefinitionId: 'd1', displayName: 'Laptop', itemType: 'Electronics', status: 'Active', currentLocation: 'Office', storageSlotId: null },
+      { id: 'durable-2', itemDefinitionId: 'd2', displayName: 'Camera', itemType: 'Electronics', status: 'Retired', currentLocation: 'Garage', storageSlotId: null }
+    ]);
+    getInventorySummaryMock.mockResolvedValue([
+      { itemDefinitionId: 'c1', itemName: 'Milk', totalQuantity: 1, unit: 'liter', entryCount: 1, hasMixedUnits: false, mixedUnitWarning: null },
+      { itemDefinitionId: 'c2', itemName: 'Beans', totalQuantity: 2, unit: 'can', entryCount: 1, hasMixedUnits: false, mixedUnitWarning: null }
+    ]);
+    getConsumableEntriesMock.mockResolvedValue([
+      { entryId: 'e1', itemDefinitionId: 'c1', itemName: 'Milk', quantity: 1, unit: 'liter', expiresOn: null, expiresInDays: null, expiryStatus: 'Safe', storageSlotId: 'Office' },
+      { entryId: 'e2', itemDefinitionId: 'c2', itemName: 'Beans', quantity: 2, unit: 'can', expiresOn: '2026-01-01', expiresInDays: -1, expiryStatus: 'Expired', storageSlotId: 'Garage' }
+    ]);
+    getShoppingListItemsMock.mockResolvedValue([
+      { id: 's1', itemDefinitionId: 'c1', itemName: 'Milk', quantity: 1, unit: 'liter', isResolved: false, isPurchased: false, status: 'ShoppingList', stockUpdateNeeded: false, nextInventoryAction: null, sourceDeficitAmount: null, sourceExpiringSoonAmount: null, sourceSuggestedPurchaseAmount: null },
+      { id: 's2', itemDefinitionId: 'c2', itemName: 'Beans', quantity: 2, unit: 'can', isResolved: false, isPurchased: false, status: 'InCart', stockUpdateNeeded: false, nextInventoryAction: null, sourceDeficitAmount: null, sourceExpiringSoonAmount: null, sourceSuggestedPurchaseAmount: null }
+    ]);
+    const { App } = await import('./main');
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<App />);
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      setControlValue(container.querySelector<HTMLSelectElement>('select[aria-label="Location filter"]')!, 'Office');
+      setControlValue(container.querySelector<HTMLSelectElement>('select[aria-label="Expiry state filter"]')!, 'Safe');
+      setControlValue(container.querySelector<HTMLSelectElement>('select[aria-label="Shopping state filter"]')!, 'ShoppingList');
+    });
+
+    expect(container.querySelector('button[aria-label="Open durable item Laptop"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label="Open durable item Camera"]')).toBeNull();
+    expect(container.textContent).toContain('Milk: 1 liter');
+    expect(container.textContent).not.toContain('Beans: 2 can [In cart / buying]');
+
+    await act(async () => {
+      setControlValue(container.querySelector<HTMLSelectElement>('select[aria-label="Item type filter"]')!, 'Durable');
+      setControlValue(container.querySelector<HTMLSelectElement>('select[aria-label="Durable status filter"]')!, 'Retired');
+      setControlValue(container.querySelector<HTMLSelectElement>('select[aria-label="Location filter"]')!, 'Garage');
+    });
+
+    expect(container.querySelector('button[aria-label="Open durable item Laptop"]')).toBeNull();
+    expect(container.querySelector('button[aria-label="Open durable item Camera"]')).not.toBeNull();
   });
 
   it('shows loading then empty states', async () => {

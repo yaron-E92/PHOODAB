@@ -85,6 +85,15 @@ export type ShoppingListItem = {
   sourceSuggestedPurchaseAmount: number | null;
 };
 
+export type GlobalSearchResult = {
+  kind: 'consumable' | 'durable' | 'location' | 'shopping';
+  typeLabel: 'Consumable' | 'Durable Item' | 'Location' | 'Shopping List' | 'Shopping Cart / Buying';
+  id: string;
+  title: string;
+  location: string | null;
+  state: string | null;
+};
+
 export async function getHealth(baseUrl: string): Promise<HealthResponse> {
   const response = await fetch(`${baseUrl}/health`);
   if (!response.ok) throw new Error(`Health failed: ${response.status}`);
@@ -284,5 +293,11 @@ export async function deleteShoppingListItem(baseUrl: string, shoppingListItemId
 export async function getShoppingListItems(baseUrl: string): Promise<ShoppingListItem[]> {
   const response = await fetch(`${baseUrl}/api/shopping-list-items`);
   if (!response.ok) throw new Error(`Shopping list items failed: ${response.status}`);
+  return response.json();
+}
+
+export async function searchPhoodab(baseUrl: string, query: string): Promise<GlobalSearchResult[]> {
+  const response = await fetch(`${baseUrl}/api/search?q=${encodeURIComponent(query)}`);
+  if (!response.ok) throw new Error(`Search failed: ${response.status}`);
   return response.json();
 }
