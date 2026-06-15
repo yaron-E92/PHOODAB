@@ -37,6 +37,7 @@ export type ConsumableEntry = {
   expiresInDays: number | null;
   expiryStatus: 'Unknown' | 'Expired' | 'Urgent' | 'Soon' | 'Safe';
   storageSlotId: string | null;
+  locationId?: string | null;
 };
 
 export type ExpiringConsumableEntry = ConsumableEntry;
@@ -44,6 +45,34 @@ export type ExpiringConsumableEntry = ConsumableEntry;
 export type DurableItemStatus = 'Active' | 'NeedsRepair' | 'LoanedOut' | 'Stored' | 'Retired' | 'Lost';
 export type DurableItem = DurableItemsResponse[number] & {
   status: DurableItemStatus;
+  locationId?: string | null;
+};
+
+export type LocationType = 'House' | 'Room' | 'StorageUnit' | 'StorageSlot';
+
+export type Location = {
+  id: string;
+  name: string;
+  type: LocationType;
+  parentLocationId: string | null;
+  description: string | null;
+  sortOrder: number | null;
+  isArchived: boolean;
+};
+
+export type LocationTreeNode = {
+  location: Location;
+  children: LocationTreeNode[];
+};
+
+export type LocationDetail = {
+  location: Location;
+  children: Location[];
+  consumables: ConsumableEntry[];
+  durableItems: DurableItem[];
+  childLocationCount: number;
+  consumableCount: number;
+  durableItemCount: number;
 };
 
 export type ReplenishmentSuggestion = {
@@ -299,5 +328,30 @@ export async function getShoppingListItems(baseUrl: string): Promise<ShoppingLis
 export async function searchPhoodab(baseUrl: string, query: string): Promise<GlobalSearchResult[]> {
   const response = await fetch(`${baseUrl}/api/search?q=${encodeURIComponent(query)}`);
   if (!response.ok) throw new Error(`Search failed: ${response.status}`);
+  return response.json();
+}
+
+export async function getLocationTree(baseUrl: string): Promise<LocationTreeNode[]> {
+  const response = await fetch(`${baseUrl}/api/locations/tree`);
+  if (!response.ok) throw new Error(`Location tree failed: ${response.status}`);
+  return response.json();
+}
+
+export async function getLocationDetail(baseUrl: string, locationId: string): Promise<LocationDetail> {
+  const response = await fetch(`${baseUrl}/api/locations/${locationId}`);
+  if (!response.ok) throw new Error(`Location detail failed: ${response.status}`);
+  return response.json();
+}
+
+export async function createLocation(
+  baseUrl: string,
+  payload: { name: string; type: LocationType; parentLocationId: string | null; description: string | null; sortOrder: number | null }
+): Promise<Location> {
+  const response = await fetch(`${baseUrl}/api/locations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) throw new Error(`Create location failed: ${response.status}`);
   return response.json();
 }

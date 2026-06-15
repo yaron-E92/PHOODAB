@@ -84,6 +84,9 @@ public class SmokeTests
         Assert.That(paths.TryGetProperty("/api/consumable-entries/expiring", out _), Is.True);
         Assert.That(paths.TryGetProperty("/api/replenishment/suggestions", out _), Is.True);
         Assert.That(paths.TryGetProperty("/api/search", out _), Is.True);
+        Assert.That(paths.TryGetProperty("/api/locations", out _), Is.True);
+        Assert.That(paths.TryGetProperty("/api/locations/tree", out _), Is.True);
+        Assert.That(paths.TryGetProperty("/api/locations/{locationId}", out _), Is.True);
     }
 
     [Test]
@@ -494,6 +497,85 @@ public class SmokeTests
         var rules = JsonSerializer.Deserialize<JsonElement>(await (await _client.GetAsync("/api/replenishment/rules")).Content.ReadAsStringAsync())
             .EnumerateArray().ToList();
         Assert.That(rules.Any(x => x.GetProperty("itemDefinitionId").GetGuid() == itemDefinitionId), Is.False);
+    }
+
+    [Test]
+    public async Task Locations_validate_hierarchy_assign_inventory_and_archive_only_when_safe()
+    {
+        async Task<JsonElement> CreateLocation(string name, string type, Guid? parentLocationId = null)
+        {
+            var response = await _client.PostAsJsonAsync("/api/locations", new { name, type, parentLocationId, description = (string?)null, sortOrder = (int?)null });
+            Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+            return JsonSerializer.Deserialize<JsonElement>(await response.Content.ReadAsStringAsync());
+        }
+
+        var house = await CreateLocation("Home", "House");
+        var houseId = house.GetProperty("id").GetGuid();
+        var room = await CreateLocation("Kitchen", "Room", houseId);
+        var roomId = room.GetProperty("id").GetGuid();
+        var storageUnit = await CreateLocation("Freezer", "StorageUnit", roomId);
+        var storageUnitId = storageUnit.GetProperty("id").GetGuid();
+        var slot = await CreateLocation("Drawer 2", "StorageSlot", storageUnitId);
+        var slotId = slot.GetProperty("id").GetGuid();
+
+        var invalidResponse = await _client.PostAsJsonAsync("/api/locations", new
+        {
+            name = "Invalid slot",
+            type = "StorageSlot",
+            parentLocationId = houseId
+        });
+        Assert.That(invalidResponse.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
+
+        var tree = JsonSerializer.Deserialize<JsonElement>(await (await _client.GetAsync("/api/locations/tree")).Content.ReadAsStringAsync());
+        Assert.That(tree[0].GetProperty("children")[0].GetProperty("children")[0].GetProperty("children")[0]
+            .GetProperty("location").GetProperty("name").GetString(), Is.EqualTo("Drawer 2"));
+
+        var consumableItemId = await CreateConsumableItem("Frozen peas");
+        var consumableResponse = await _client.PostAsJsonAsync("/api/consumable-entries", new
+        {
+            itemDefinitionId = consumableItemId,
+            quantity = 2m,
+            unit = "bag",
+            expiresOn = (DateOnly?)null,
+            locationId = slotId
+        });
+        Assert.That(consumableResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        var consumableId = JsonSerializer.Deserialize<JsonElement>(await consumableResponse.Content.ReadAsStringAsync()).GetProperty("id").GetGuid();
+
+        var durableResponse = await _client.PostAsJsonAsync("/api/durable-entries", new
+        {
+            displayName = "Ice maker",
+            status = "Active",
+            locationId = slotId
+        });
+        Assert.That(durableResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        var durableId = JsonSerializer.Deserialize<JsonElement>(await durableResponse.Content.ReadAsStringAsync()).GetProperty("id").GetGuid();
+
+        var detailResponse = await _client.GetAsync($"/api/locations/{houseId}");
+        Assert.That(detailResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        var detail = JsonSerializer.Deserialize<JsonElement>(await detailResponse.Content.ReadAsStringAsync());
+        Assert.Multiple(() =>
+        {
+            Assert.That(detail.GetProperty("childLocationCount").GetInt32(), Is.EqualTo(1));
+            Assert.That(detail.GetProperty("consumableCount").GetInt32(), Is.EqualTo(1));
+            Assert.That(detail.GetProperty("durableItemCount").GetInt32(), Is.EqualTo(1));
+            Assert.That(detail.GetProperty("consumables")[0].GetProperty("locationId").GetGuid(), Is.EqualTo(slotId));
+            Assert.That(detail.GetProperty("durableItems")[0].GetProperty("locationId").GetGuid(), Is.EqualTo(slotId));
+        });
+
+        Assert.That((await _client.DeleteAsync($"/api/locations/{slotId}")).StatusCode, Is.EqualTo(HttpStatusCode.Conflict));
+
+        Assert.That((await _client.PatchAsJsonAsync($"/api/durable-entries/{durableId}/retire", new { notes = "Retired" })).StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        Assert.That((await _client.PatchAsJsonAsync($"/api/consumable-entries/{consumableId}", new
+        {
+            quantity = 0m,
+            unit = "bag",
+            expiresOn = (DateOnly?)null,
+            locationId = slotId
+        })).StatusCode, Is.EqualTo(HttpStatusCode.OK));
+
+        Assert.That((await _client.DeleteAsync($"/api/locations/{slotId}")).StatusCode, Is.EqualTo(HttpStatusCode.NoContent));
+        Assert.That((await _client.DeleteAsync($"/api/locations/{houseId}")).StatusCode, Is.EqualTo(HttpStatusCode.Conflict));
     }
 
     [Test]

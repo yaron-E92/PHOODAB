@@ -18,6 +18,9 @@ import {
   deleteShoppingListItem,
   getDurableItem,
   getDurableItems,
+  getLocationDetail,
+  getLocationTree,
+  createLocation,
   retireDurableItem,
   updateConsumableEntry,
   updateDurableItem,
@@ -31,7 +34,11 @@ import {
   type ReplenishmentRule,
   type ItemDefinition,
   type ShoppingListItem,
-  type GlobalSearchResult
+  type GlobalSearchResult,
+  type Location,
+  type LocationDetail,
+  type LocationTreeNode,
+  type LocationType
 } from '../../../packages/api-client/src/client';
 
 const baseUrl = 'http://localhost:5199';
@@ -41,7 +48,9 @@ type EntryActionEdit = { addStock: string; addStockUnit: string; consumeStock: s
 type ItemRoute =
   | { kind: 'inventory' }
   | { kind: 'consumable'; itemDefinitionId: string }
-  | { kind: 'durable'; entryId: string };
+  | { kind: 'durable'; entryId: string }
+  | { kind: 'locations' }
+  | { kind: 'location'; locationId: string };
 type DurableItemForm = {
   displayName: string;
   description: string;
@@ -61,6 +70,10 @@ type DurableItemForm = {
 const durableStatuses: DurableItemStatus[] = ['Active', 'NeedsRepair', 'LoanedOut', 'Stored', 'Retired', 'Lost'];
 
 const getItemRoute = (pathname: string): ItemRoute => {
+  if (/^\/locations\/?$/.test(pathname)) return { kind: 'locations' };
+  const locationMatch = pathname.match(/^\/locations\/([^/]+)\/?$/);
+  if (locationMatch) return { kind: 'location', locationId: decodeURIComponent(locationMatch[1]) };
+
   const match = pathname.match(/^\/items\/(consumable|durable)\/([^/]+)\/?$/);
   if (!match) return { kind: 'inventory' };
 
@@ -68,6 +81,22 @@ const getItemRoute = (pathname: string): ItemRoute => {
     ? { kind: 'consumable', itemDefinitionId: decodeURIComponent(match[2]) }
     : { kind: 'durable', entryId: decodeURIComponent(match[2]) };
 };
+
+const flattenLocationTree = (nodes: LocationTreeNode[]): Location[] =>
+  nodes.flatMap((node) => [node.location, ...flattenLocationTree(node.children)]);
+
+const LocationTreeList = ({ nodes, onOpen }: { nodes: LocationTreeNode[]; onOpen: (locationId: string) => void }) => (
+  <ul>
+    {nodes.map((node) => (
+      <li key={node.location.id}>
+        <button onClick={() => onOpen(node.location.id)} aria-label={`Open location ${node.location.name}`}>
+          {node.location.name} ({node.location.type})
+        </button>
+        {node.children.length > 0 && <LocationTreeList nodes={node.children} onOpen={onOpen} />}
+      </li>
+    ))}
+  </ul>
+);
 
 const emptyDurableItemForm: DurableItemForm = {
   displayName: '',
@@ -193,6 +222,14 @@ export function App() {
   const [editingDurableItemId, setEditingDurableItemId] = useState<string | null>(null);
   const [selectedDurableItem, setSelectedDurableItem] = useState<DurableItem | null>(null);
   const [durableDetailLoading, setDurableDetailLoading] = useState(false);
+  const [locationTree, setLocationTree] = useState<LocationTreeNode[]>([]);
+  const [selectedLocation, setSelectedLocation] = useState<LocationDetail | null>(null);
+  const [locationDetailLoading, setLocationDetailLoading] = useState(false);
+  const [locationName, setLocationName] = useState('');
+  const [locationType, setLocationType] = useState<LocationType>('House');
+  const [locationParentId, setLocationParentId] = useState('');
+  const [locationDescription, setLocationDescription] = useState('');
+  const [locationSortOrder, setLocationSortOrder] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<GlobalSearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -213,14 +250,15 @@ export function App() {
     setError(null);
 
     try {
-      const [summaryData, entriesData, expiringData, suggestionData, shoppingData, rulesData, durableData] = await Promise.all([
+      const [summaryData, entriesData, expiringData, suggestionData, shoppingData, rulesData, durableData, locationTreeData] = await Promise.all([
         getInventorySummary(baseUrl),
         getConsumableEntries(baseUrl),
         getExpiringConsumableEntries(baseUrl),
         getReplenishmentSuggestions(baseUrl),
         getShoppingListItems(baseUrl),
         getReplenishmentRules(baseUrl),
-        getDurableItems(baseUrl)
+        getDurableItems(baseUrl),
+        getLocationTree(baseUrl)
       ]);
       setSummary(summaryData);
       setConsumableEntries(entriesData);
@@ -232,6 +270,7 @@ export function App() {
       setShoppingListItems(shoppingData);
       setRules(rulesData);
       setDurableItems(durableData);
+      setLocationTree(locationTreeData);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -326,6 +365,28 @@ export function App() {
     setRoute(getItemRoute(path));
   };
 
+  const onCreateLocation = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!locationName.trim()) return;
+
+    try {
+      await createLocation(baseUrl, {
+        name: locationName.trim(),
+        type: locationType,
+        parentLocationId: locationType === 'House' ? null : locationParentId || null,
+        description: toNullableString(locationDescription),
+        sortOrder: locationSortOrder ? Number(locationSortOrder) : null
+      });
+      setLocationName('');
+      setLocationDescription('');
+      setLocationSortOrder('');
+      setError(null);
+      await loadData();
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
   const onSearch = async (event: React.FormEvent) => {
     event.preventDefault();
     const query = searchQuery.trim();
@@ -356,9 +417,7 @@ export function App() {
       return;
     }
     if (result.kind === 'location') {
-      setLocationFilter(result.title);
-      setItemTypeFilter('All');
-      navigate('/#smart-filters');
+      navigate(`/locations/${encodeURIComponent(result.id)}`);
       return;
     }
 
@@ -437,6 +496,29 @@ export function App() {
       })
       .finally(() => {
         if (isCurrent) setDurableDetailLoading(false);
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [route]);
+
+  useEffect(() => {
+    if (route.kind !== 'location') return;
+
+    let isCurrent = true;
+    setLocationDetailLoading(true);
+    setSelectedLocation(null);
+    setError(null);
+    getLocationDetail(baseUrl, route.locationId)
+      .then((detail) => {
+        if (isCurrent) setSelectedLocation(detail);
+      })
+      .catch((e) => {
+        if (isCurrent) setError(String(e));
+      })
+      .finally(() => {
+        if (isCurrent) setLocationDetailLoading(false);
       });
 
     return () => {
@@ -718,6 +800,13 @@ export function App() {
   );
 
   const selectedDurableDetail = selectedDurableItem;
+  const allLocations = flattenLocationTree(locationTree);
+  const expectedParentType: Partial<Record<LocationType, LocationType>> = {
+    Room: 'House',
+    StorageUnit: 'Room',
+    StorageSlot: 'StorageUnit'
+  };
+  const possibleLocationParents = allLocations.filter((location) => location.type === expectedParentType[locationType]);
   const renderDurableEditor = () => (
     <form onSubmit={onSaveDurableItem} aria-label="Edit durable item">
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'end', marginTop: 12 }}>
@@ -807,6 +896,96 @@ export function App() {
       </div>
     </form>
   );
+
+  if (route.kind === 'locations') {
+    return (
+      <main style={{ fontFamily: 'system-ui', padding: 16 }}>
+        <button onClick={() => navigate('/')} aria-label="Back to inventory">Back to Inventory</button>
+        {renderGlobalSearch()}
+        <h1>Locations</h1>
+        <p>Browse inventory from House to Room to Storage Unit to Storage Slot.</p>
+        {error && <p role="alert">Error: {error}</p>}
+        <section aria-label="Location hierarchy">
+          <h2>Location Hierarchy</h2>
+          {!isLoading && locationTree.length === 0 && <p>No locations yet.</p>}
+          {locationTree.length > 0 && <LocationTreeList nodes={locationTree} onOpen={(id) => navigate(`/locations/${encodeURIComponent(id)}`)} />}
+        </section>
+        <section aria-label="Create location">
+          <h2>Create Location</h2>
+          <form onSubmit={onCreateLocation} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'end' }}>
+            <label>
+              Name
+              <input aria-label="Location name" value={locationName} onChange={(event) => setLocationName(event.target.value)} />
+            </label>
+            <label>
+              Type
+              <select
+                aria-label="Location type"
+                value={locationType}
+                onChange={(event) => {
+                  setLocationType(event.target.value as LocationType);
+                  setLocationParentId('');
+                }}
+              >
+                {(['House', 'Room', 'StorageUnit', 'StorageSlot'] as LocationType[]).map((type) => <option key={type} value={type}>{type}</option>)}
+              </select>
+            </label>
+            <label>
+              Parent
+              <select aria-label="Location parent" value={locationParentId} disabled={locationType === 'House'} onChange={(event) => setLocationParentId(event.target.value)}>
+                <option value="">Select parent</option>
+                {possibleLocationParents.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}
+              </select>
+            </label>
+            <label>
+              Description
+              <input aria-label="Location description" value={locationDescription} onChange={(event) => setLocationDescription(event.target.value)} />
+            </label>
+            <label>
+              Display order
+              <input aria-label="Location display order" type="number" min={0} value={locationSortOrder} onChange={(event) => setLocationSortOrder(event.target.value)} />
+            </label>
+            <button type="submit">Create Location</button>
+          </form>
+        </section>
+      </main>
+    );
+  }
+
+  if (route.kind === 'location') {
+    const detail = selectedLocation;
+    return (
+      <main style={{ fontFamily: 'system-ui', padding: 16 }}>
+        <button onClick={() => navigate('/locations')} aria-label="Back to locations">Back to Locations</button>
+        {renderGlobalSearch()}
+        {locationDetailLoading && <p>Loading location detail...</p>}
+        {error && <p role="alert">Error: {error}</p>}
+        {!locationDetailLoading && detail && (
+          <section aria-label={`Location detail for ${detail.location.name}`}>
+            <h1>{detail.location.name}</h1>
+            <p>{detail.location.type} | ID: {detail.location.id}</p>
+            {detail.location.description && <p>{detail.location.description}</p>}
+            <p>{detail.childLocationCount} child locations, {detail.consumableCount} consumable lots, {detail.durableItemCount} durable items</p>
+            <h2>Child Locations</h2>
+            {detail.children.length === 0 && <p>No child locations.</p>}
+            <ul>
+              {detail.children.map((child) => (
+                <li key={child.id}>
+                  <button onClick={() => navigate(`/locations/${encodeURIComponent(child.id)}`)}>{child.name} ({child.type})</button>
+                </li>
+              ))}
+            </ul>
+            <h2>Consumables Stored Here</h2>
+            {detail.consumables.length === 0 && <p>No consumables stored here.</p>}
+            <ul>{detail.consumables.map((entry) => <li key={entry.entryId}>{entry.itemName}: {entry.quantity} {entry.unit}</li>)}</ul>
+            <h2>Durable Items Stored Here</h2>
+            {detail.durableItems.length === 0 && <p>No durable items stored here.</p>}
+            <ul>{detail.durableItems.map((item) => <li key={item.id}>{getDurableDisplayName(item)} ({item.status})</li>)}</ul>
+          </section>
+        )}
+      </main>
+    );
+  }
 
   if (route.kind === 'consumable') {
     const item = summary.find((candidate) => candidate.itemDefinitionId === route.itemDefinitionId);
@@ -987,6 +1166,7 @@ export function App() {
   return (
     <main style={{ fontFamily: 'system-ui', padding: 16 }}>
       <h1>PHOODAB Pantry MVP</h1>
+      <button onClick={() => navigate('/locations')}>Browse Locations</button>
       {renderGlobalSearch()}
       <p>Health: {health}</p>
       <p>Version: {version}</p>

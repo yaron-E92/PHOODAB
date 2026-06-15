@@ -12,6 +12,9 @@ const getReplenishmentRulesMock = vi.fn();
 const getShoppingListItemsMock = vi.fn();
 const getDurableItemsMock = vi.fn();
 const getDurableItemMock = vi.fn();
+const getLocationTreeMock = vi.fn();
+const getLocationDetailMock = vi.fn();
+const createLocationMock = vi.fn();
 const searchPhoodabMock = vi.fn();
 const createConsumableItemMock = vi.fn().mockResolvedValue({ id: 'item-1', name: 'Milk', kind: 'Consumable' });
 const createDurableItemMock = vi.fn();
@@ -45,6 +48,9 @@ vi.mock('../../../packages/api-client/src/client', () => ({
   getShoppingListItems: getShoppingListItemsMock,
   getDurableItems: getDurableItemsMock,
   getDurableItem: getDurableItemMock,
+  getLocationTree: getLocationTreeMock,
+  getLocationDetail: getLocationDetailMock,
+  createLocation: createLocationMock,
   searchPhoodab: searchPhoodabMock,
   createConsumableItem: createConsumableItemMock,
   createDurableItem: createDurableItemMock,
@@ -71,6 +77,17 @@ describe('pantry mvp page', () => {
     getReplenishmentRulesMock.mockResolvedValue([]);
     getShoppingListItemsMock.mockResolvedValue([]);
     getDurableItemsMock.mockResolvedValue([]);
+    getLocationTreeMock.mockResolvedValue([]);
+    getLocationDetailMock.mockResolvedValue({
+      location: { id: 'slot-1', name: 'Top shelf', type: 'StorageSlot', parentLocationId: 'unit-1', description: null, sortOrder: 1, isArchived: false },
+      children: [],
+      consumables: [],
+      durableItems: [],
+      childLocationCount: 0,
+      consumableCount: 0,
+      durableItemCount: 0
+    });
+    createLocationMock.mockResolvedValue({ id: 'house-1', name: 'Home', type: 'House', parentLocationId: null, description: null, sortOrder: null, isArchived: false });
     searchPhoodabMock.mockResolvedValue([]);
     getDurableItemMock.mockResolvedValue({
       id: 'durable-1',
@@ -962,6 +979,52 @@ describe('pantry mvp page', () => {
 
     expect(container.textContent).toContain('Rice: mixed units (2 entries)');
     expect(container.textContent).toContain('Mixed units cannot be totaled safely.');
+  });
+
+  it('browses the location hierarchy and shows location-centric inventory details', async () => {
+    getLocationTreeMock.mockResolvedValue([
+      {
+        location: { id: 'house-1', name: 'Home', type: 'House', parentLocationId: null, description: null, sortOrder: 1, isArchived: false },
+        children: [{
+          location: { id: 'room-1', name: 'Kitchen', type: 'Room', parentLocationId: 'house-1', description: null, sortOrder: 1, isArchived: false },
+          children: []
+        }]
+      }
+    ]);
+    getLocationDetailMock.mockResolvedValue({
+      location: { id: 'room-1', name: 'Kitchen', type: 'Room', parentLocationId: 'house-1', description: 'Main kitchen', sortOrder: 1, isArchived: false },
+      children: [{ id: 'unit-1', name: 'Freezer', type: 'StorageUnit', parentLocationId: 'room-1', description: null, sortOrder: 1, isArchived: false }],
+      consumables: [{ entryId: 'entry-1', itemDefinitionId: 'item-1', itemName: 'Peas', quantity: 2, unit: 'bag', expiresOn: null, expiresInDays: null, expiryStatus: 'Unknown', storageSlotId: 'unit-1' }],
+      durableItems: [{ id: 'durable-1', itemDefinitionId: 'item-2', displayName: 'Ice maker', status: 'Active', storageSlotId: 'unit-1' }],
+      childLocationCount: 1,
+      consumableCount: 1,
+      durableItemCount: 1
+    });
+
+    const { App } = await import('./main');
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<App />);
+      await Promise.resolve();
+    });
+    await act(async () => {
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Browse Locations')!.click();
+    });
+    expect(container.textContent).toContain('Home (House)');
+    expect(container.textContent).toContain('Kitchen (Room)');
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('button[aria-label="Open location Kitchen"]')!.click();
+      await Promise.resolve();
+    });
+
+    expect(getLocationDetailMock).toHaveBeenCalledWith('http://localhost:5199', 'room-1');
+    expect(container.textContent).toContain('1 child locations, 1 consumable lots, 1 durable items');
+    expect(container.textContent).toContain('Peas: 2 bag');
+    expect(container.textContent).toContain('Ice maker (Active)');
   });
 
   it('shows basic error state', async () => {

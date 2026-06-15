@@ -13,6 +13,8 @@ public sealed record ConsumableEntryReadModel(
     string ExpiryStatus,
     Guid? StorageSlotId)
 {
+    public Guid? LocationId => StorageSlotId;
+
     public static ConsumableEntryReadModel From(ConsumableEntry entry, DateOnly todayUtc, int expiryWarningDays = 2)
     {
         int? expiresInDays = entry.ExpiresOn is null ? null : entry.ExpiresOn.Value.DayNumber - todayUtc.DayNumber;

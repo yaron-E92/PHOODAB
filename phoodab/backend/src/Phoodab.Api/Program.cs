@@ -64,19 +64,20 @@ app.MapPost("/api/durable-entries", (CreateDurableEntryRequest request, IInvento
         return Results.BadRequest(new ErrorResponse("Unsupported durable item status."));
     }
 
-    if (request.ItemDefinitionId.HasValue && string.IsNullOrWhiteSpace(request.DisplayName))
-    {
-        var existingEntry = store.CreateDurableEntry(request.ItemDefinitionId.Value, request.StorageSlotId);
-        return existingEntry is null ? Results.NotFound() : Results.Ok(existingEntry);
-    }
-
-    if (string.IsNullOrWhiteSpace(request.DisplayName))
-    {
-        return Results.BadRequest(new ErrorResponse("Display name is required."));
-    }
-
     try
     {
+        var locationId = request.LocationId ?? request.StorageSlotId;
+        if (request.ItemDefinitionId.HasValue && string.IsNullOrWhiteSpace(request.DisplayName))
+        {
+            var existingEntry = store.CreateDurableEntry(request.ItemDefinitionId.Value, locationId);
+            return existingEntry is null ? Results.NotFound() : Results.Ok(existingEntry);
+        }
+
+        if (string.IsNullOrWhiteSpace(request.DisplayName))
+        {
+            return Results.BadRequest(new ErrorResponse("Display name is required."));
+        }
+
         var entry = store.CreateDurableItem(
             request.DisplayName,
             request.Description,
@@ -90,7 +91,7 @@ app.MapPost("/api/durable-entries", (CreateDurableEntryRequest request, IInvento
             status ?? DurableItemStatus.Active,
             request.CurrentLocation,
             request.Notes,
-            request.StorageSlotId);
+            locationId);
         return Results.Ok(entry);
     }
     catch (ArgumentException ex)
@@ -143,7 +144,7 @@ app.MapPatch("/api/durable-entries/{entryId:guid}", (Guid entryId, UpdateDurable
             status ?? DurableItemStatus.Active,
             request.CurrentLocation,
             request.Notes,
-            request.StorageSlotId);
+            request.LocationId ?? request.StorageSlotId);
         return entry is null ? Results.NotFound() : Results.Ok(entry);
     }
     catch (ArgumentException ex)
@@ -167,9 +168,16 @@ app.MapPatch("/api/durable-entries/{entryId:guid}/retire", (Guid entryId, Retire
 
 app.MapPost("/api/consumable-entries", (CreateConsumableEntryRequest request, IInventoryMvpStore store) =>
 {
-    var entry = store.AddConsumableEntry(request.ItemDefinitionId, request.Quantity, request.Unit, request.ExpiresOn, request.StorageSlotId);
-    return entry is null ? Results.NotFound() : Results.Ok(entry);
-}).WithOpenApi();
+    try
+    {
+        var entry = store.AddConsumableEntry(request.ItemDefinitionId, request.Quantity, request.Unit, request.ExpiresOn, request.LocationId ?? request.StorageSlotId);
+        return entry is null ? Results.NotFound() : Results.Ok(entry);
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new ErrorResponse(ex.Message));
+    }
+}).Produces<ErrorResponse>(StatusCodes.Status400BadRequest).WithOpenApi();
 
 app.MapGet("/api/consumable-entries", (IInventoryMvpStore store, IUtcDateProvider utcDateProvider) =>
     Results.Ok(store.GetConsumableEntryReadModels(utcDateProvider.TodayUtc)))
@@ -178,10 +186,18 @@ app.MapGet("/api/consumable-entries", (IInventoryMvpStore store, IUtcDateProvide
 
 app.MapPatch("/api/consumable-entries/{entryId:guid}", (Guid entryId, UpdateConsumableEntryRequest request, IInventoryMvpStore store, IUtcDateProvider utcDateProvider) =>
 {
-    var updated = store.UpdateConsumableEntry(entryId, request.Quantity, request.Unit, request.ExpiresOn, request.StorageSlotId, utcDateProvider.TodayUtc);
-    return updated is null ? Results.NotFound() : Results.Ok(updated);
+    try
+    {
+        var updated = store.UpdateConsumableEntry(entryId, request.Quantity, request.Unit, request.ExpiresOn, request.LocationId ?? request.StorageSlotId, utcDateProvider.TodayUtc);
+        return updated is null ? Results.NotFound() : Results.Ok(updated);
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new ErrorResponse(ex.Message));
+    }
 })
 .Produces<ConsumableEntryReadModel>(StatusCodes.Status200OK)
+.Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
 .Produces(StatusCodes.Status404NotFound)
 .WithOpenApi();
 
@@ -240,6 +256,88 @@ app.MapDelete("/api/shopping-list-items/{shoppingListItemId:guid}", (Guid shoppi
 
 app.MapGet("/api/shopping-list-items", (IInventoryMvpStore store) => Results.Ok(store.GetShoppingListItems())).WithOpenApi();
 
+app.MapGet("/api/locations", (bool? includeArchived, IInventoryMvpStore store) =>
+    Results.Ok(store.GetLocations(includeArchived ?? false)))
+    .Produces<IEnumerable<LocationReadModel>>(StatusCodes.Status200OK)
+    .WithOpenApi();
+
+app.MapGet("/api/locations/tree", (IInventoryMvpStore store) => Results.Ok(store.GetLocationTree()))
+    .Produces<IEnumerable<LocationTreeNodeReadModel>>(StatusCodes.Status200OK)
+    .WithOpenApi();
+
+app.MapGet("/api/locations/{locationId:guid}", (Guid locationId, IInventoryMvpStore store, IUtcDateProvider utcDateProvider) =>
+{
+    var detail = store.GetLocationDetail(locationId, utcDateProvider.TodayUtc);
+    return detail is null ? Results.NotFound() : Results.Ok(detail);
+})
+.Produces<LocationDetailReadModel>(StatusCodes.Status200OK)
+.Produces(StatusCodes.Status404NotFound)
+.WithOpenApi();
+
+app.MapPost("/api/locations", (CreateLocationRequest request, IInventoryMvpStore store) =>
+{
+    if (!TryParseLocationType(request.Type, out var type))
+    {
+        return Results.BadRequest(new ErrorResponse("Unsupported location type."));
+    }
+
+    try
+    {
+        return Results.Ok(store.CreateLocation(request.Name, type, request.ParentLocationId, request.Description, request.SortOrder));
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new ErrorResponse(ex.Message));
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.BadRequest(new ErrorResponse(ex.Message));
+    }
+})
+.Produces<LocationReadModel>(StatusCodes.Status200OK)
+.Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
+.WithOpenApi();
+
+app.MapPatch("/api/locations/{locationId:guid}", (Guid locationId, UpdateLocationRequest request, IInventoryMvpStore store) =>
+{
+    if (!TryParseLocationType(request.Type, out var type))
+    {
+        return Results.BadRequest(new ErrorResponse("Unsupported location type."));
+    }
+
+    try
+    {
+        var updated = store.UpdateLocation(locationId, request.Name, type, request.ParentLocationId, request.Description, request.SortOrder);
+        return updated is null ? Results.NotFound() : Results.Ok(updated);
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new ErrorResponse(ex.Message));
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.BadRequest(new ErrorResponse(ex.Message));
+    }
+})
+.Produces<LocationReadModel>(StatusCodes.Status200OK)
+.Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
+.Produces(StatusCodes.Status404NotFound)
+.WithOpenApi();
+
+app.MapDelete("/api/locations/{locationId:guid}", (Guid locationId, IInventoryMvpStore store) =>
+    store.ArchiveLocation(locationId) switch
+    {
+        LocationArchiveResult.Archived => Results.NoContent(),
+        LocationArchiveResult.NotFound => Results.NotFound(),
+        LocationArchiveResult.HasChildren => Results.Conflict(new ErrorResponse("Location cannot be archived while it has active child locations.")),
+        LocationArchiveResult.HasItems => Results.Conflict(new ErrorResponse("Location cannot be archived while it contains active inventory items.")),
+        _ => Results.StatusCode(StatusCodes.Status500InternalServerError)
+    })
+    .Produces(StatusCodes.Status204NoContent)
+    .Produces<ErrorResponse>(StatusCodes.Status409Conflict)
+    .Produces(StatusCodes.Status404NotFound)
+    .WithOpenApi();
+
 app.MapGet("/api/search", (string? q, IInventoryMvpStore store) => Results.Ok(store.Search(q ?? string.Empty)))
     .Produces<IEnumerable<GlobalSearchResultReadModel>>(StatusCodes.Status200OK)
     .WithOpenApi();
@@ -281,6 +379,11 @@ static bool TryParseDurableStatus(string? status, out DurableItemStatus? parsed)
     return false;
 }
 
+static bool TryParseLocationType(string? type, out LocationType parsed)
+{
+    return Enum.TryParse(type?.Trim(), ignoreCase: true, out parsed) && Enum.IsDefined(parsed);
+}
+
 app.Run();
 
 public sealed record ErrorResponse([property: Required] string Message);
@@ -301,7 +404,8 @@ public sealed record CreateDurableEntryRequest(
     string? Status,
     string? CurrentLocation,
     string? Notes,
-    Guid? StorageSlotId);
+    Guid? StorageSlotId,
+    Guid? LocationId);
 public sealed record UpdateDurableEntryRequest(
     string DisplayName,
     string? Description,
@@ -315,10 +419,13 @@ public sealed record UpdateDurableEntryRequest(
     string? Status,
     string? CurrentLocation,
     string? Notes,
-    Guid? StorageSlotId);
+    Guid? StorageSlotId,
+    Guid? LocationId);
 public sealed record RetireDurableEntryRequest(string? Notes);
-public sealed record CreateConsumableEntryRequest(Guid ItemDefinitionId, decimal Quantity, string Unit, DateOnly? ExpiresOn, Guid? StorageSlotId);
-public sealed record UpdateConsumableEntryRequest(decimal Quantity, string Unit, DateOnly? ExpiresOn, Guid? StorageSlotId);
+public sealed record CreateConsumableEntryRequest(Guid ItemDefinitionId, decimal Quantity, string Unit, DateOnly? ExpiresOn, Guid? StorageSlotId, Guid? LocationId);
+public sealed record UpdateConsumableEntryRequest(decimal Quantity, string Unit, DateOnly? ExpiresOn, Guid? StorageSlotId, Guid? LocationId);
+public sealed record CreateLocationRequest(string Name, string Type, Guid? ParentLocationId, string? Description, int? SortOrder);
+public sealed record UpdateLocationRequest(string Name, string Type, Guid? ParentLocationId, string? Description, int? SortOrder);
 public sealed record CreateShoppingListItemFromSuggestionRequest(Guid ItemDefinitionId, decimal Quantity, string Unit, decimal? DeficitAmount, decimal? ExpiringSoonAmount, decimal? SuggestedPurchaseAmount);
 public sealed record UpdateShoppingListItemStatusRequest(bool? IsResolved, bool? IsPurchased, string? Status);
 public sealed record UpdateReplenishmentRuleRequest(decimal? DesiredAmount, string? DesiredUnit, bool? IsDisabled, int? ExpiryWarningDays);

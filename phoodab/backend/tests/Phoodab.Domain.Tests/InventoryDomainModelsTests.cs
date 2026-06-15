@@ -150,4 +150,25 @@ public class InventoryDomainModelsTests
             Assert.That(shoppingList.HomeId, Is.EqualTo(home.Id));
         });
     }
+
+    [Test]
+    public void Location_enforces_the_supported_hierarchy()
+    {
+        var house = new Location(Guid.NewGuid(), "Home", LocationType.House);
+        var room = new Location(Guid.NewGuid(), "Kitchen", LocationType.Room, house.Id, house.Type);
+        var storageUnit = new Location(Guid.NewGuid(), "Freezer", LocationType.StorageUnit, room.Id, room.Type);
+        var slot = new Location(Guid.NewGuid(), "Drawer 2", LocationType.StorageSlot, storageUnit.Id, storageUnit.Type);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(slot.Name, Is.EqualTo("Drawer 2"));
+            Assert.That(slot.ParentLocationId, Is.EqualTo(storageUnit.Id));
+            Assert.Throws<InvalidOperationException>(() =>
+                new Location(Guid.NewGuid(), "Invalid", LocationType.StorageSlot, house.Id, house.Type));
+            Assert.Throws<InvalidOperationException>(() =>
+                new Location(Guid.NewGuid(), "Orphan", LocationType.Room));
+            Assert.Throws<InvalidOperationException>(() =>
+                new Location(Guid.NewGuid(), "Nested house", LocationType.House, room.Id, room.Type));
+        });
+    }
 }
