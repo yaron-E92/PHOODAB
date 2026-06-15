@@ -18,6 +18,8 @@ public sealed class MainPage : ContentPage
     private readonly Label _healthLabel = new() { Text = "Health: loading" };
     private readonly Label _versionLabel = new() { Text = "Version: loading" };
     private readonly Label _statusLabel = new() { TextColor = Colors.DarkRed };
+    private readonly Entry _searchEntry = new() { Placeholder = "Search items, locations, and shopping" };
+    private readonly VerticalStackLayout _searchResults = new() { Spacing = 8 };
     private readonly Entry _itemNameEntry = new() { Placeholder = "Item name" };
     private readonly Entry _desiredAmountEntry = new() { Placeholder = "Desired amount (optional)", Keyboard = Keyboard.Numeric };
     private readonly Entry _desiredUnitEntry = new() { Placeholder = "Desired unit (optional)" };
@@ -61,6 +63,14 @@ public sealed class MainPage : ContentPage
     private PageId _activePage = PageId.Dashboard;
     private string? _editingDurableEntryId;
     private string? _selectedDurableEntryId;
+    private string? _selectedConsumableItemDefinitionId;
+    private string _inventoryLocationFilter = "All";
+    private string _expiryStatusFilter = "All";
+    private string _durableStatusFilter = "All";
+    private string _durableLocationFilter = "All";
+    private string _locationItemTypeFilter = "All";
+    private string _locationFilter = "All";
+    private string _shoppingStatusFilter = "All";
 
     public MainPage(
         IInventoryMvpStore store,
@@ -76,6 +86,9 @@ public sealed class MainPage : ContentPage
         _durableStatusPicker.SelectedItem = DurableItemStatus.Active.ToString();
         _durableSaveButton.Clicked += async (_, _) => await SaveDurableItemAsync();
         _durableCancelButton.Clicked += (_, _) => ClearDurableForm();
+        _searchEntry.ReturnType = ReturnType.Search;
+        _searchEntry.Completed += async (_, _) => await SearchAsync();
+        SemanticProperties.SetDescription(_searchEntry, "Search all PHOODAB items, locations, and shopping entries");
 
         Content = new ScrollView { Content = _content };
         BuildShell();
@@ -111,6 +124,10 @@ public sealed class MainPage : ContentPage
             Text = "Pantry, shopping, locations, and durable inventory",
             TextColor = Colors.DarkSlateGray
         });
+        var searchSection = Section("Global Search");
+        searchSection.Children.Add(GridRows(_searchEntry, Button("Search", SearchAsync)));
+        searchSection.Children.Add(_searchResults);
+        _content.Children.Add(searchSection);
         BuildNavigation();
         _content.Children.Add(_navigation);
         _content.Children.Add(Button("Refresh", async () => await LoadDataAsync()));
@@ -131,6 +148,8 @@ public sealed class MainPage : ContentPage
         switch (_activePage)
         {
             case PageId.Inventory:
+                AddInventoryFiltersSection();
+                AddSelectedConsumableSection();
                 AddCreateItemSection();
                 AddEntrySection();
                 AddInventorySummarySection();
@@ -140,12 +159,15 @@ public sealed class MainPage : ContentPage
                 AddRulesSection();
                 break;
             case PageId.Shopping:
+                AddShoppingFiltersSection();
                 AddShoppingSection();
                 break;
             case PageId.Locations:
+                AddLocationFiltersSection();
                 AddLocationsSection();
                 break;
             case PageId.Durable:
+                AddDurableFiltersSection();
                 AddDurableFormSection();
                 AddDurableItemsSection();
                 break;
@@ -187,6 +209,154 @@ public sealed class MainPage : ContentPage
             button.TextColor = isActive ? Colors.White : Colors.Black;
             button.BorderColor = isActive ? Colors.LightSeaGreen : Colors.LightGray;
         }
+    }
+
+    private async Task SearchAsync()
+    {
+        var query = (_searchEntry.Text ?? string.Empty).Trim();
+        _searchResults.Children.Clear();
+
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            _searchResults.Children.Add(new Label { Text = "Enter a search term." });
+            return;
+        }
+
+        SetStatus("Searching...", isError: false);
+        try
+        {
+            var results = await Task.Run(() => _store.Search(query));
+            if (results.Count == 0)
+            {
+                _searchResults.Children.Add(new Label { Text = "No search results." });
+            }
+            else
+            {
+                foreach (var result in results)
+                {
+                    var text = $"{result.Title} [{result.TypeLabel}]";
+                    if (!string.IsNullOrWhiteSpace(result.Location))
+                    {
+                        text += $" - {result.Location}";
+                    }
+
+                    _searchResults.Children.Add(WithDescription(
+                        Button(text, () => OpenSearchResultAsync(result)),
+                        $"Open {result.TypeLabel} {result.Title}"));
+                }
+            }
+
+            SetStatus(string.Empty, isError: false);
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Search error: {ex.Message}", isError: true);
+        }
+    }
+
+    private Task OpenSearchResultAsync(GlobalSearchResultReadModel result)
+    {
+        switch (result.Kind)
+        {
+            case "consumable":
+                _selectedConsumableItemDefinitionId = result.Id;
+                _activePage = PageId.Inventory;
+                break;
+            case "durable":
+                _selectedDurableEntryId = result.Id;
+                _activePage = PageId.Durable;
+                break;
+            case "location":
+                _locationFilter = result.Title;
+                _activePage = PageId.Locations;
+                break;
+            case "shopping":
+                _shoppingStatusFilter = string.IsNullOrWhiteSpace(result.State) ? "All" : result.State;
+                _activePage = PageId.Shopping;
+                break;
+        }
+
+        RebuildDataSections();
+        return Task.CompletedTask;
+    }
+
+    private void AddInventoryFiltersSection()
+    {
+        var section = Section("Pantry Filters");
+        section.Children.Add(GridRows(
+            FilterPicker("Location", LocationOptions(), _inventoryLocationFilter, value => _inventoryLocationFilter = value),
+            FilterPicker("Expiry state", ["All", "Unknown", "Expired", "Urgent", "Soon", "Safe"], _expiryStatusFilter, value => _expiryStatusFilter = value)));
+        _dataContent.Children.Add(section);
+    }
+
+    private void AddDurableFiltersSection()
+    {
+        var section = Section("Equipment Filters");
+        section.Children.Add(GridRows(
+            FilterPicker("Status", ["All", .. Enum.GetNames<DurableItemStatus>()], _durableStatusFilter, value => _durableStatusFilter = value),
+            FilterPicker("Location", LocationOptions(), _durableLocationFilter, value => _durableLocationFilter = value)));
+        _dataContent.Children.Add(section);
+    }
+
+    private void AddLocationFiltersSection()
+    {
+        var section = Section("Location Filters");
+        section.Children.Add(GridRows(
+            FilterPicker("Item type", ["All", "Consumable", "Durable Item"], _locationItemTypeFilter, value => _locationItemTypeFilter = value),
+            FilterPicker("Location", LocationOptions(), _locationFilter, value => _locationFilter = value)));
+        _dataContent.Children.Add(section);
+    }
+
+    private void AddShoppingFiltersSection()
+    {
+        var section = Section("Shopping Filters");
+        section.Children.Add(FilterPicker(
+            "Shopping state",
+            ["All", "ShoppingList", "InCart", "Bought", "StockUpdateNeeded"],
+            _shoppingStatusFilter,
+            value => _shoppingStatusFilter = value));
+        _dataContent.Children.Add(section);
+    }
+
+    private void AddSelectedConsumableSection()
+    {
+        if (string.IsNullOrWhiteSpace(_selectedConsumableItemDefinitionId))
+        {
+            return;
+        }
+
+        var summary = _summary.FirstOrDefault(item => item.ItemDefinitionId == _selectedConsumableItemDefinitionId);
+        var lots = _consumableEntries.Where(entry => entry.ItemDefinitionId == _selectedConsumableItemDefinitionId).ToList();
+        var itemName = summary?.ItemName ?? lots.FirstOrDefault()?.ItemName ?? "Consumable item";
+        var section = Section("Selected Consumable");
+        section.Children.Add(new Label { Text = $"{itemName} [Consumable]", FontAttributes = FontAttributes.Bold });
+
+        if (summary is not null)
+        {
+            section.Children.Add(new Label
+            {
+                Text = summary.HasMixedUnits
+                    ? $"Mixed units across {summary.EntryCount} lots"
+                    : $"Current amount: {summary.TotalQuantity?.ToString(CultureInfo.InvariantCulture) ?? "0"} {summary.Unit}"
+            });
+        }
+
+        if (lots.Count == 0)
+        {
+            section.Children.Add(new Label { Text = "No lots recorded." });
+        }
+        else
+        {
+            foreach (var lot in lots)
+            {
+                section.Children.Add(new Label
+                {
+                    Text = $"Lot {lot.EntryId}: {lot.Quantity.ToString(CultureInfo.InvariantCulture)} {lot.Unit}; {lot.ExpiryStatus}; location {lot.StorageSlotId ?? "not set"}"
+                });
+            }
+        }
+
+        _dataContent.Children.Add(section);
     }
 
     private void AddDashboardSection()
@@ -238,10 +408,12 @@ public sealed class MainPage : ContentPage
         var section = Section("Locations");
         var rows = _consumableEntries
             .Where(entry => !string.IsNullOrWhiteSpace(entry.StorageSlotId))
-            .Select(entry => ($"Location: {entry.StorageSlotId}", $"{entry.ItemName} lot {entry.EntryId}", $"{entry.Quantity.ToString(CultureInfo.InvariantCulture)} {entry.Unit}"))
+            .Select(entry => (Type: "Consumable", Location: entry.StorageSlotId!, Title: $"{entry.ItemName} lot {entry.EntryId}", Detail: $"{entry.Quantity.ToString(CultureInfo.InvariantCulture)} {entry.Unit}"))
             .Concat(_durableItems
                 .Where(item => !string.IsNullOrWhiteSpace(item.CurrentLocation) || !string.IsNullOrWhiteSpace(item.StorageSlotId))
-                .Select(item => ($"Location: {DurableLocation(item)}", item.DisplayName, $"{DurableType(item)} [{item.Status}]")))
+                .Select(item => (Type: "Durable Item", Location: DurableLocation(item), Title: item.DisplayName, Detail: $"{DurableType(item)} [{item.Status}]")))
+            .Where(row => (_locationItemTypeFilter == "All" || row.Type == _locationItemTypeFilter)
+                && (_locationFilter == "All" || row.Location == _locationFilter))
             .ToList();
 
         if (rows.Count == 0)
@@ -253,9 +425,9 @@ public sealed class MainPage : ContentPage
             foreach (var row in rows)
             {
                 var layout = new VerticalStackLayout { Spacing = 4 };
-                layout.Children.Add(new Label { Text = row.Item1, FontAttributes = FontAttributes.Bold });
-                layout.Children.Add(new Label { Text = row.Item2 });
-                layout.Children.Add(new Label { Text = row.Item3, TextColor = Colors.DarkSlateGray });
+                layout.Children.Add(new Label { Text = $"Location: {row.Location}", FontAttributes = FontAttributes.Bold });
+                layout.Children.Add(new Label { Text = $"{row.Title} [{row.Type}]" });
+                layout.Children.Add(new Label { Text = row.Detail, TextColor = Colors.DarkSlateGray });
                 section.Children.Add(Card(layout));
             }
         }
@@ -355,14 +527,22 @@ public sealed class MainPage : ContentPage
     private void AddDurableItemsSection()
     {
         var section = Section("Equipment");
+        var visibleItems = _durableItems
+            .Where(item => (_durableStatusFilter == "All" || item.Status == _durableStatusFilter)
+                && (_durableLocationFilter == "All" || DurableLocation(item) == _durableLocationFilter))
+            .ToList();
 
         if (_durableItems.Count == 0)
         {
             section.Children.Add(new Label { Text = "No durable items." });
         }
+        else if (visibleItems.Count == 0)
+        {
+            section.Children.Add(new Label { Text = "No durable items match the filters." });
+        }
         else
         {
-            foreach (var item in _durableItems)
+            foreach (var item in visibleItems)
             {
                 section.Children.Add(DurableItemCard(item));
             }
@@ -442,14 +622,22 @@ public sealed class MainPage : ContentPage
     private void AddInventorySummarySection()
     {
         var section = Section("Inventory Summary");
+        var visibleItems = _summary
+            .Where(item => _inventoryLocationFilter == "All" && _expiryStatusFilter == "All"
+                || _consumableEntries.Any(entry => entry.ItemDefinitionId == item.ItemDefinitionId && MatchesInventoryFilters(entry)))
+            .ToList();
 
         if (_summary.Count == 0)
         {
             section.Children.Add(new Label { Text = "No inventory yet." });
         }
+        else if (visibleItems.Count == 0)
+        {
+            section.Children.Add(new Label { Text = "No inventory matches the filters." });
+        }
         else
         {
-            foreach (var item in _summary)
+            foreach (var item in visibleItems)
             {
                 var text = item.HasMixedUnits
                     ? $"{item.ItemName}: mixed units ({item.EntryCount} entries)"
@@ -460,7 +648,12 @@ public sealed class MainPage : ContentPage
                     text += $" - {item.MixedUnitWarning}";
                 }
 
-                section.Children.Add(new Label { Text = text });
+                section.Children.Add(Button(text, () =>
+                {
+                    _selectedConsumableItemDefinitionId = item.ItemDefinitionId;
+                    RebuildDataSections();
+                    return Task.CompletedTask;
+                }));
             }
         }
 
@@ -470,14 +663,19 @@ public sealed class MainPage : ContentPage
     private void AddConsumableAuditSection()
     {
         var section = Section("Consumable Entry Audit");
+        var visibleEntries = _consumableEntries.Where(MatchesInventoryFilters).ToList();
 
         if (_consumableEntries.Count == 0)
         {
             section.Children.Add(new Label { Text = "No consumable entries." });
         }
+        else if (visibleEntries.Count == 0)
+        {
+            section.Children.Add(new Label { Text = "No consumable entries match the filters." });
+        }
         else
         {
-            foreach (var entry in _consumableEntries)
+            foreach (var entry in visibleEntries)
             {
                 section.Children.Add(EntryCard(entry));
             }
@@ -527,14 +725,19 @@ public sealed class MainPage : ContentPage
     private void AddExpiringSection()
     {
         var section = Section("Expiring Consumables");
+        var visibleEntries = _expiringEntries.Where(MatchesInventoryFilters).ToList();
 
         if (_expiringEntries.Count == 0)
         {
             section.Children.Add(new Label { Text = "No expiring consumables." });
         }
+        else if (visibleEntries.Count == 0)
+        {
+            section.Children.Add(new Label { Text = "No expiring consumables match the filters." });
+        }
         else
         {
-            foreach (var entry in _expiringEntries)
+            foreach (var entry in visibleEntries)
             {
                 section.Children.Add(new Label
                 {
@@ -582,14 +785,21 @@ public sealed class MainPage : ContentPage
     private void AddShoppingSection()
     {
         var section = Section("Shopping List");
+        var visibleItems = _shoppingListItems
+            .Where(item => _shoppingStatusFilter == "All" || ShoppingStatus(item) == _shoppingStatusFilter)
+            .ToList();
 
         if (_shoppingListItems.Count == 0)
         {
             section.Children.Add(new Label { Text = "No shopping list items." });
         }
+        else if (visibleItems.Count == 0)
+        {
+            section.Children.Add(new Label { Text = "No shopping items match the filter." });
+        }
         else
         {
-            foreach (var item in _shoppingListItems)
+            foreach (var item in visibleItems)
             {
                 var layout = new VerticalStackLayout { Spacing = 8 };
                 layout.Children.Add(new Label { Text = item.ItemName, FontAttributes = FontAttributes.Bold });
@@ -1256,6 +1466,26 @@ public sealed class MainPage : ContentPage
         target.AddRange(source);
     }
 
+    private bool MatchesInventoryFilters(ConsumableEntry entry)
+    {
+        return (_inventoryLocationFilter == "All" || entry.StorageSlotId == _inventoryLocationFilter)
+            && (_expiryStatusFilter == "All" || entry.ExpiryStatus == _expiryStatusFilter);
+    }
+
+    private List<string> LocationOptions()
+    {
+        return [
+            "All",
+            .. _consumableEntries
+                .Select(entry => entry.StorageSlotId)
+                .Concat(_durableItems.Select(item => item.CurrentLocation ?? item.StorageSlotId))
+                .Where(location => !string.IsNullOrWhiteSpace(location))
+                .Select(location => location!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(location => location, StringComparer.OrdinalIgnoreCase)
+        ];
+    }
+
     private static string? BlankToNull(string? value)
     {
         var trimmed = (value ?? string.Empty).Trim();
@@ -1334,6 +1564,37 @@ public sealed class MainPage : ContentPage
                     FontAttributes = FontAttributes.Bold,
                     TextColor = Colors.Black
                 }
+            }
+        };
+    }
+
+    private View FilterPicker(string title, IEnumerable<string> options, string selected, Action<string> onChanged)
+    {
+        var picker = new Picker
+        {
+            Title = title,
+            ItemsSource = options.ToList(),
+            SelectedItem = selected
+        };
+        SemanticProperties.SetDescription(picker, $"{title} filter");
+        picker.SelectedIndexChanged += (_, _) =>
+        {
+            if (picker.SelectedItem is not string value || value == selected)
+            {
+                return;
+            }
+
+            onChanged(value);
+            RebuildDataSections();
+        };
+
+        return new VerticalStackLayout
+        {
+            Spacing = 4,
+            Children =
+            {
+                new Label { Text = title },
+                picker
             }
         };
     }
