@@ -52,6 +52,7 @@ public interface IInventoryMvpStore
     object? UpdateShoppingListItemStatus(Guid shoppingListItemId, bool? isResolved, bool? isPurchased, string? status);
     bool DeleteShoppingListItem(Guid shoppingListItemId);
     IReadOnlyList<object> GetShoppingListItems();
+    IReadOnlyList<GlobalSearchResultReadModel> Search(string query, int limit = 20);
 }
 
 public sealed class FileInventoryMvpStore : IInventoryMvpStore
@@ -513,6 +514,75 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
         }
     }
 
+    public IReadOnlyList<GlobalSearchResultReadModel> Search(string query, int limit = 20)
+    {
+        if (string.IsNullOrWhiteSpace(query) || limit <= 0)
+        {
+            return [];
+        }
+
+        lock (_sync)
+        {
+            var state = LoadState();
+            var term = query.Trim();
+            var results = new List<GlobalSearchResultReadModel>();
+
+            results.AddRange(state.ItemDefinitions
+                .Where(item => item.Kind == ItemKind.Consumable && Contains(item.Name, term))
+                .Select(item => new GlobalSearchResultReadModel(
+                    "consumable",
+                    "Consumable",
+                    item.Id.ToString(),
+                    item.Name)));
+
+            results.AddRange(state.DurableEntries
+                .Select(entry => ToDurableItemReadModel(state, entry))
+                .Where(entry => Contains(entry.DisplayName, term))
+                .Select(entry => new GlobalSearchResultReadModel(
+                    "durable",
+                    "Durable Item",
+                    entry.Id.ToString(),
+                    entry.DisplayName,
+                    entry.CurrentLocation ?? entry.StorageSlotId?.ToString(),
+                    entry.Status.ToString())));
+
+            var locations = state.ConsumableEntries
+                .Select(entry => entry.StorageSlotId?.ToString())
+                .Concat(state.DurableEntries.Select(entry => entry.CurrentLocation))
+                .Concat(state.DurableEntries.Select(entry => entry.StorageSlotId?.ToString()))
+                .Where(location => !string.IsNullOrWhiteSpace(location))
+                .Select(location => location!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Where(location => Contains(location, term));
+
+            results.AddRange(locations.Select(location => new GlobalSearchResultReadModel(
+                "location",
+                "Location",
+                location,
+                location)));
+
+            results.AddRange(state.ShoppingListItems
+                .Where(item => Contains(item.ItemName, term))
+                .Select(item =>
+                {
+                    var status = DeriveShoppingStatus(item);
+                    return new GlobalSearchResultReadModel(
+                        "shopping",
+                        status == ShoppingStatusShoppingList ? "Shopping List" : "Shopping Cart / Buying",
+                        item.Id.ToString(),
+                        item.ItemName,
+                        null,
+                        status);
+                }));
+
+            return results
+                .OrderBy(result => result.Title, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(result => result.TypeLabel, StringComparer.Ordinal)
+                .Take(limit)
+                .ToList();
+        }
+    }
+
     public bool DeleteShoppingListItem(Guid shoppingListItemId)
     {
         lock (_sync)
@@ -546,6 +616,9 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
 
         return state;
     }
+
+    private static bool Contains(string? value, string term) =>
+        value?.Contains(term, StringComparison.OrdinalIgnoreCase) == true;
 
     private void SaveState(InventoryMvpState state)
     {
@@ -819,3 +892,11 @@ public sealed record DurableItemReadModel(
     string? CurrentLocation,
     string? Notes,
     Guid? StorageSlotId);
+
+public sealed record GlobalSearchResultReadModel(
+    string Kind,
+    string TypeLabel,
+    string Id,
+    string Title,
+    string? Location = null,
+    string? State = null);

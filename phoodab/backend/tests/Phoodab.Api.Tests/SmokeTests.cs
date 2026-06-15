@@ -83,6 +83,57 @@ public class SmokeTests
         Assert.That(paths.TryGetProperty("/api/inventory/summary", out _), Is.True);
         Assert.That(paths.TryGetProperty("/api/consumable-entries/expiring", out _), Is.True);
         Assert.That(paths.TryGetProperty("/api/replenishment/suggestions", out _), Is.True);
+        Assert.That(paths.TryGetProperty("/api/search", out _), Is.True);
+    }
+
+    [Test]
+    public async Task Global_search_returns_mixed_labeled_results_and_ignores_blank_queries()
+    {
+        var blankResponse = await _client.GetAsync("/api/search?q=%20%20");
+        Assert.That(blankResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        var blankResults = JsonSerializer.Deserialize<JsonElement>(await blankResponse.Content.ReadAsStringAsync());
+        Assert.That(blankResults.GetArrayLength(), Is.Zero);
+
+        var itemResponse = await _client.PostAsJsonAsync("/api/item-definitions", new
+        {
+            name = "Milk",
+            kind = ItemKind.Consumable,
+            desiredAmount = 2m,
+            desiredUnit = "liter"
+        });
+        var item = JsonSerializer.Deserialize<JsonElement>(await itemResponse.Content.ReadAsStringAsync());
+
+        var shoppingResponse = await _client.PostAsJsonAsync("/api/shopping-list-items/from-suggestion", new
+        {
+            itemDefinitionId = item.GetProperty("id").GetGuid(),
+            quantity = 1m,
+            unit = "liter"
+        });
+        Assert.That(shoppingResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+
+        var durableResponse = await _client.PostAsJsonAsync("/api/durable-entries", new
+        {
+            displayName = "Milk Frother",
+            itemType = "Appliance",
+            status = "Active",
+            currentLocation = "Milk pantry"
+        });
+        Assert.That(durableResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+
+        var searchResponse = await _client.GetAsync("/api/search?q=mILk");
+        Assert.That(searchResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        var results = JsonSerializer.Deserialize<JsonElement>(await searchResponse.Content.ReadAsStringAsync())
+            .EnumerateArray().ToList();
+
+        Assert.That(results.Select(result => result.GetProperty("typeLabel").GetString()), Is.SupersetOf(new[]
+        {
+            "Consumable",
+            "Durable Item",
+            "Location",
+            "Shopping List"
+        }));
+        Assert.That(results.All(result => !string.IsNullOrWhiteSpace(result.GetProperty("id").GetString())), Is.True);
+        Assert.That(results.All(result => !string.IsNullOrWhiteSpace(result.GetProperty("title").GetString())), Is.True);
     }
 
     [Test]

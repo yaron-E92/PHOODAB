@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import {
   addConsumableEntry,
@@ -10,6 +10,7 @@ import {
   getReplenishmentSuggestions,
   getReplenishmentRules,
   getShoppingListItems,
+  searchPhoodab,
   getVersion,
   createShoppingListItemFromSuggestion,
   createDurableItem,
@@ -29,7 +30,8 @@ import {
   type ReplenishmentSuggestion,
   type ReplenishmentRule,
   type ItemDefinition,
-  type ShoppingListItem
+  type ShoppingListItem,
+  type GlobalSearchResult
 } from '../../../packages/api-client/src/client';
 
 const baseUrl = 'http://localhost:5199';
@@ -191,6 +193,17 @@ export function App() {
   const [editingDurableItemId, setEditingDurableItemId] = useState<string | null>(null);
   const [selectedDurableItem, setSelectedDurableItem] = useState<DurableItem | null>(null);
   const [durableDetailLoading, setDurableDetailLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<GlobalSearchResult[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  const [itemTypeFilter, setItemTypeFilter] = useState<'All' | 'Consumable' | 'Durable'>('All');
+  const [locationFilter, setLocationFilter] = useState('All');
+  const [durableStatusFilter, setDurableStatusFilter] = useState<'All' | DurableItemStatus>('All');
+  const [expiryStateFilter, setExpiryStateFilter] = useState<'All' | ConsumableEntry['expiryStatus']>('All');
+  const [shoppingStateFilter, setShoppingStateFilter] = useState<'All' | ShoppingListItem['status']>('All');
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -313,6 +326,46 @@ export function App() {
     setRoute(getItemRoute(path));
   };
 
+  const onSearch = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const query = searchQuery.trim();
+    if (!query) {
+      setSearchResults([]);
+      setSearchError(null);
+      return;
+    }
+
+    setIsSearching(true);
+    setSearchError(null);
+    try {
+      setSearchResults(await searchPhoodab(baseUrl, query));
+    } catch (e) {
+      setSearchError(String(e));
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const onOpenSearchResult = (result: GlobalSearchResult) => {
+    if (result.kind === 'consumable') {
+      navigate(`/items/consumable/${encodeURIComponent(result.id)}`);
+      return;
+    }
+    if (result.kind === 'durable') {
+      navigate(`/items/durable/${encodeURIComponent(result.id)}`);
+      return;
+    }
+    if (result.kind === 'location') {
+      setLocationFilter(result.title);
+      setItemTypeFilter('All');
+      navigate('/#smart-filters');
+      return;
+    }
+
+    setShoppingStateFilter(result.state === 'ShoppingList' ? 'ShoppingList' : (result.state as ShoppingListItem['status']) || 'All');
+    navigate('/#shopping-list');
+  };
+
   const onOpenDurableItem = (item: DurableItem) => {
     if (!item.id) return;
     navigate(`/items/durable/${encodeURIComponent(item.id)}`);
@@ -348,6 +401,17 @@ export function App() {
     getHealth(baseUrl).then((r) => setHealth(r.status)).catch((e) => setHealth(String(e)));
     getVersion(baseUrl).then((r) => setVersion(r.version)).catch((e) => setVersion(String(e)));
     loadData();
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (event.key !== '/' || (target instanceof Element && target.matches('input, textarea, select'))) return;
+      event.preventDefault();
+      searchInputRef.current?.focus();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
   useEffect(() => {
@@ -554,6 +618,105 @@ export function App() {
     clearEntryError(entry.entryId);
   };
 
+  const availableLocations = [...new Set([
+    ...consumableEntries.map((entry) => entry.storageSlotId),
+    ...durableItems.map((item) => item.currentLocation || item.storageSlotId)
+  ].filter((location): location is string => Boolean(location)))].sort((a, b) => a.localeCompare(b));
+  const matchesLocation = (location: string | null | undefined) => locationFilter === 'All' || location === locationFilter;
+  const visibleDurableItems = durableItems.filter((item) =>
+    itemTypeFilter !== 'Consumable'
+    && matchesLocation(item.currentLocation || item.storageSlotId)
+    && (durableStatusFilter === 'All' || item.status === durableStatusFilter));
+  const visibleConsumableEntries = consumableEntries.filter((entry) =>
+    itemTypeFilter !== 'Durable'
+    && matchesLocation(entry.storageSlotId)
+    && (expiryStateFilter === 'All' || entry.expiryStatus === expiryStateFilter));
+  const visibleSummary = summary.filter((item) =>
+    itemTypeFilter !== 'Durable'
+    && (locationFilter === 'All' || consumableEntries.some((entry) =>
+      entry.itemDefinitionId === item.itemDefinitionId && entry.storageSlotId === locationFilter)));
+  const visibleExpiringEntries = expiringEntries.filter((entry) =>
+    itemTypeFilter !== 'Durable'
+    && matchesLocation(entry.storageSlotId)
+    && (expiryStateFilter === 'All' || entry.expiryStatus === expiryStateFilter));
+  const visibleShoppingItems = shoppingListItems.filter((item) =>
+    shoppingStateFilter === 'All' || getShoppingStatus(item) === shoppingStateFilter);
+
+  const renderGlobalSearch = () => (
+    <section aria-label="Global search" style={{ margin: '16px 0' }}>
+      <form onSubmit={onSearch} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <input
+          ref={searchInputRef}
+          aria-label="Search PHOODAB"
+          placeholder="Search items, locations, and shopping"
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+        />
+        <button type="submit">Search</button>
+        <span>Press / to focus</span>
+      </form>
+      {isSearching && <p>Searching...</p>}
+      {searchError && <p role="alert">Search error: {searchError}</p>}
+      {!isSearching && searchQuery.trim() && !searchError && searchResults.length === 0 && <p>No search results.</p>}
+      {searchResults.length > 0 && (
+        <ul aria-label="Search results">
+          {searchResults.map((result) => (
+            <li key={`${result.kind}-${result.id}`}>
+              <button onClick={() => onOpenSearchResult(result)} aria-label={`Open ${result.typeLabel} ${result.title}`}>
+                <strong>{result.title}</strong> [{result.typeLabel}]
+                {result.location && <> - {result.location}</>}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+
+  const renderSmartFilters = () => (
+    <section id="smart-filters" aria-label="Smart filters" style={{ display: 'flex', flexWrap: 'wrap', gap: 12, margin: '16px 0' }}>
+      <label>
+        Item type
+        <select aria-label="Item type filter" value={itemTypeFilter} onChange={(event) => setItemTypeFilter(event.target.value as typeof itemTypeFilter)}>
+          <option value="All">All</option>
+          <option value="Consumable">Consumable</option>
+          <option value="Durable">Durable Item</option>
+        </select>
+      </label>
+      <label>
+        Location
+        <select aria-label="Location filter" value={locationFilter} onChange={(event) => setLocationFilter(event.target.value)}>
+          <option value="All">All</option>
+          {availableLocations.map((location) => <option key={location} value={location}>{location}</option>)}
+        </select>
+      </label>
+      <label>
+        Durable status
+        <select aria-label="Durable status filter" value={durableStatusFilter} onChange={(event) => setDurableStatusFilter(event.target.value as typeof durableStatusFilter)}>
+          <option value="All">All</option>
+          {durableStatuses.map((status) => <option key={status} value={status}>{status}</option>)}
+        </select>
+      </label>
+      <label>
+        Expiry state
+        <select aria-label="Expiry state filter" value={expiryStateFilter} onChange={(event) => setExpiryStateFilter(event.target.value as typeof expiryStateFilter)}>
+          <option value="All">All</option>
+          {(['Unknown', 'Expired', 'Urgent', 'Soon', 'Safe'] as ConsumableEntry['expiryStatus'][]).map((status) => <option key={status} value={status}>{status}</option>)}
+        </select>
+      </label>
+      <label>
+        Shopping state
+        <select aria-label="Shopping state filter" value={shoppingStateFilter} onChange={(event) => setShoppingStateFilter(event.target.value as typeof shoppingStateFilter)}>
+          <option value="All">All</option>
+          <option value="ShoppingList">Shopping List</option>
+          <option value="InCart">In Cart / Buying</option>
+          <option value="Bought">Bought</option>
+          <option value="StockUpdateNeeded">Stock Update Needed</option>
+        </select>
+      </label>
+    </section>
+  );
+
   const selectedDurableDetail = selectedDurableItem;
   const renderDurableEditor = () => (
     <form onSubmit={onSaveDurableItem} aria-label="Edit durable item">
@@ -658,6 +821,7 @@ export function App() {
     return (
       <main style={{ fontFamily: 'system-ui', padding: 16 }}>
         <button onClick={() => navigate('/')} aria-label="Back to inventory">Back to Inventory</button>
+        {renderGlobalSearch()}
         <section aria-label={`Consumable item detail for ${itemName}`} style={{ marginTop: 16 }}>
           <span style={{ background: '#dcfce7', color: '#166534', padding: '4px 8px', borderRadius: 12, fontWeight: 700 }}>Consumable</span>
           <h1>{itemName}</h1>
@@ -782,6 +946,7 @@ export function App() {
     return (
       <main style={{ fontFamily: 'system-ui', padding: 16 }}>
         <button onClick={() => navigate('/')} aria-label="Back to inventory">Back to Inventory</button>
+        {renderGlobalSearch()}
         <section aria-label={`Durable item detail for ${name}`} style={{ marginTop: 16 }}>
           <span style={{ background: '#dbeafe', color: '#1e40af', padding: '4px 8px', borderRadius: 12, fontWeight: 700 }}>Durable</span>
           <h1>{name}</h1>
@@ -822,8 +987,10 @@ export function App() {
   return (
     <main style={{ fontFamily: 'system-ui', padding: 16 }}>
       <h1>PHOODAB Pantry MVP</h1>
+      {renderGlobalSearch()}
       <p>Health: {health}</p>
       <p>Version: {version}</p>
+      {renderSmartFilters()}
 
       <h2>Create Consumable Item</h2>
       <form onSubmit={onCreateItem}>
@@ -956,9 +1123,10 @@ export function App() {
         </div>
       </form>
       {!isLoading && !error && durableItems.length === 0 && <p>No durable items.</p>}
-      {!isLoading && !error && durableItems.length > 0 && (
+      {!isLoading && !error && durableItems.length > 0 && visibleDurableItems.length === 0 && <p>No durable items match the filters.</p>}
+      {!isLoading && !error && visibleDurableItems.length > 0 && (
         <ul>
-          {durableItems.map((item) => {
+          {visibleDurableItems.map((item) => {
             const name = getDurableDisplayName(item);
             const location = item.currentLocation || item.storageSlotId || 'No location set';
             return (
@@ -980,9 +1148,10 @@ export function App() {
       {isLoading && <p>Loading pantry data...</p>}
       {error && <p>Error: {error}</p>}
       {!isLoading && !error && summary.length === 0 && <p>No inventory yet.</p>}
-      {!isLoading && !error && summary.length > 0 && (
+      {!isLoading && !error && summary.length > 0 && visibleSummary.length === 0 && <p>No inventory matches the filters.</p>}
+      {!isLoading && !error && visibleSummary.length > 0 && (
         <ul>
-          {summary.map((item) => (
+          {visibleSummary.map((item) => (
             <li key={item.itemDefinitionId}>
               {item.hasMixedUnits
                 ? `${item.itemName}: mixed units (${item.entryCount} entries)`
@@ -1002,9 +1171,10 @@ export function App() {
 
       <h2>Consumable Entry Audit</h2>
       {!isLoading && !error && consumableEntries.length === 0 && <p>No consumable entries.</p>}
-      {!isLoading && !error && consumableEntries.length > 0 && (
+      {!isLoading && !error && consumableEntries.length > 0 && visibleConsumableEntries.length === 0 && <p>No consumable entries match the filters.</p>}
+      {!isLoading && !error && visibleConsumableEntries.length > 0 && (
         <ul>
-          {consumableEntries.map((entry) => {
+          {visibleConsumableEntries.map((entry) => {
             const edit = entryEdits[entry.entryId] ?? toEntryEdit(entry);
             const actionEdit = entryActionEdits[entry.entryId] ?? toEntryActionEdit(entry);
             const expiryStyle = getExpiryStyle(entry.expiryStatus);
@@ -1104,9 +1274,10 @@ export function App() {
 
       <h2>Expiring / Expired Entries</h2>
       {!isLoading && !error && expiringEntries.length === 0 && <p>No expiring entries.</p>}
-      {!isLoading && !error && expiringEntries.length > 0 && (
+      {!isLoading && !error && expiringEntries.length > 0 && visibleExpiringEntries.length === 0 && <p>No expiring entries match the filters.</p>}
+      {!isLoading && !error && visibleExpiringEntries.length > 0 && (
         <ul>
-          {expiringEntries.map((entry) => (
+          {visibleExpiringEntries.map((entry) => (
             <li key={entry.entryId}>
               {entry.itemName} - {entry.quantity} {entry.unit} - {entry.expiryStatus}
             </li>
@@ -1205,11 +1376,12 @@ export function App() {
         </ul>
       )}
 
-      <h2>Shopping List</h2>
+      <h2 id="shopping-list">Shopping List</h2>
       {!isLoading && !error && shoppingListItems.length === 0 && <p>No shopping items.</p>}
-      {!isLoading && !error && shoppingListItems.length > 0 && (
+      {!isLoading && !error && shoppingListItems.length > 0 && visibleShoppingItems.length === 0 && <p>No shopping items match the filters.</p>}
+      {!isLoading && !error && visibleShoppingItems.length > 0 && (
         <ul>
-          {shoppingListItems.map((item) => {
+          {visibleShoppingItems.map((item) => {
             const status = getShoppingStatus(item);
             const stockAction = item.nextInventoryAction ?? (item.stockUpdateNeeded ? 'Add stock details for quantity, lot, expiry, and location.' : null);
             return (

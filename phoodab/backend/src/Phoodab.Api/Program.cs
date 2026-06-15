@@ -240,6 +240,10 @@ app.MapDelete("/api/shopping-list-items/{shoppingListItemId:guid}", (Guid shoppi
 
 app.MapGet("/api/shopping-list-items", (IInventoryMvpStore store) => Results.Ok(store.GetShoppingListItems())).WithOpenApi();
 
+app.MapGet("/api/search", (string? q, IInventoryMvpStore store) => Results.Ok(store.Search(q ?? string.Empty)))
+    .Produces<IEnumerable<GlobalSearchResultReadModel>>(StatusCodes.Status200OK)
+    .WithOpenApi();
+
 app.MapGet("/replenishment/suggestions", (ReplenishmentSuggestionService suggestionService, IInventoryMvpStore store) =>
 {
     var suggestions = suggestionService.GetSuggestions(store.GetRules(), store.GetConsumableEntries());
