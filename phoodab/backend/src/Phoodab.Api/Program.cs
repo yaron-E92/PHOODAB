@@ -69,8 +69,11 @@ app.MapPost("/api/durable-entries", (CreateDurableEntryRequest request, IInvento
         var locationId = request.LocationId ?? request.StorageSlotId;
         if (request.ItemDefinitionId.HasValue && string.IsNullOrWhiteSpace(request.DisplayName))
         {
+            // Backward-compatible path for creating an entry from an existing durable item definition.
             var existingEntry = store.CreateDurableEntry(request.ItemDefinitionId.Value, locationId);
-            return existingEntry is null ? Results.NotFound() : Results.Ok(existingEntry);
+            return existingEntry is null
+                ? Results.BadRequest(new ErrorResponse("Item definition must reference an existing durable item definition."))
+                : Results.Ok(existingEntry);
         }
 
         if (string.IsNullOrWhiteSpace(request.DisplayName))
@@ -100,7 +103,6 @@ app.MapPost("/api/durable-entries", (CreateDurableEntryRequest request, IInvento
     }
 }).Produces<DurableItemReadModel>(StatusCodes.Status200OK)
 .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
-.Produces(StatusCodes.Status404NotFound)
 .WithOpenApi();
 
 app.MapGet("/api/durable-entries", (IInventoryMvpStore store) => Results.Ok(store.GetDurableEntries()))
@@ -177,7 +179,11 @@ app.MapPost("/api/consumable-entries", (CreateConsumableEntryRequest request, II
     {
         return Results.BadRequest(new ErrorResponse(ex.Message));
     }
-}).Produces<ErrorResponse>(StatusCodes.Status400BadRequest).WithOpenApi();
+})
+.Produces<ConsumableEntry>(StatusCodes.Status200OK)
+.Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
+.Produces(StatusCodes.Status404NotFound)
+.WithOpenApi();
 
 app.MapGet("/api/consumable-entries", (IInventoryMvpStore store, IUtcDateProvider utcDateProvider) =>
     Results.Ok(store.GetConsumableEntryReadModels(utcDateProvider.TodayUtc)))
@@ -331,11 +337,12 @@ app.MapDelete("/api/locations/{locationId:guid}", (Guid locationId, IInventoryMv
         LocationArchiveResult.NotFound => Results.NotFound(),
         LocationArchiveResult.HasChildren => Results.Conflict(new ErrorResponse("Location cannot be archived while it has active child locations.")),
         LocationArchiveResult.HasItems => Results.Conflict(new ErrorResponse("Location cannot be archived while it contains active inventory items.")),
-        _ => Results.StatusCode(StatusCodes.Status500InternalServerError)
+        _ => Results.Problem("Unexpected location archive result.", statusCode: StatusCodes.Status500InternalServerError)
     })
     .Produces(StatusCodes.Status204NoContent)
     .Produces<ErrorResponse>(StatusCodes.Status409Conflict)
     .Produces(StatusCodes.Status404NotFound)
+    .Produces(StatusCodes.Status500InternalServerError)
     .WithOpenApi();
 
 app.MapGet("/api/search", (string? q, IInventoryMvpStore store) => Results.Ok(store.Search(q ?? string.Empty)))

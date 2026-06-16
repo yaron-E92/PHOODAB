@@ -87,6 +87,23 @@ public class SmokeTests
         Assert.That(paths.TryGetProperty("/api/locations", out _), Is.True);
         Assert.That(paths.TryGetProperty("/api/locations/tree", out _), Is.True);
         Assert.That(paths.TryGetProperty("/api/locations/{locationId}", out _), Is.True);
+
+        var consumablePostResponses = paths.GetProperty("/api/consumable-entries").GetProperty("post").GetProperty("responses");
+        Assert.Multiple(() =>
+        {
+            Assert.That(consumablePostResponses.TryGetProperty("200", out _), Is.True);
+            Assert.That(consumablePostResponses.TryGetProperty("400", out _), Is.True);
+            Assert.That(consumablePostResponses.TryGetProperty("404", out _), Is.True);
+        });
+
+        var locationDeleteResponses = paths.GetProperty("/api/locations/{locationId}").GetProperty("delete").GetProperty("responses");
+        Assert.Multiple(() =>
+        {
+            Assert.That(locationDeleteResponses.TryGetProperty("204", out _), Is.True);
+            Assert.That(locationDeleteResponses.TryGetProperty("404", out _), Is.True);
+            Assert.That(locationDeleteResponses.TryGetProperty("409", out _), Is.True);
+            Assert.That(locationDeleteResponses.TryGetProperty("500", out _), Is.True);
+        });
     }
 
     [Test]
@@ -413,6 +430,20 @@ public class SmokeTests
             .EnumerateArray().ToList();
 
         Assert.That(rules.Any(x => x.GetProperty("itemDefinitionId").GetGuid() == itemId), Is.False);
+    }
+
+    [Test]
+    public async Task Durable_entry_from_existing_definition_rejects_invalid_definition_request()
+    {
+        var response = await _client.PostAsJsonAsync("/api/durable-entries", new
+        {
+            itemDefinitionId = Guid.NewGuid(),
+            storageSlotId = (Guid?)null
+        });
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
+        var error = JsonSerializer.Deserialize<JsonElement>(await response.Content.ReadAsStringAsync());
+        Assert.That(error.GetProperty("message").GetString(), Is.EqualTo("Item definition must reference an existing durable item definition."));
     }
 
     [Test]

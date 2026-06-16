@@ -818,6 +818,7 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
 
     private static HashSet<Guid> GetDescendantLocationIds(Guid locationId, IReadOnlyList<LocationState> locations)
     {
+        // Breadth-first traversal; location hierarchy is not binary, so in/pre/post-order labels do not apply.
         var result = new HashSet<Guid> { locationId };
         var pending = new Queue<Guid>();
         pending.Enqueue(locationId);
