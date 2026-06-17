@@ -21,6 +21,7 @@ import {
   getLocationDetail,
   getLocationTree,
   createLocation,
+  updateLocation,
   retireDurableItem,
   updateConsumableEntry,
   updateDurableItem,
@@ -85,14 +86,25 @@ const getItemRoute = (pathname: string): ItemRoute => {
 const flattenLocationTree = (nodes: LocationTreeNode[]): Location[] =>
   nodes.flatMap((node) => [node.location, ...flattenLocationTree(node.children)]);
 
-const LocationTreeList = ({ nodes, onOpen }: { nodes: LocationTreeNode[]; onOpen: (locationId: string) => void }) => (
+const LocationTreeList = ({
+  nodes,
+  onOpen,
+  onEdit
+}: {
+  nodes: LocationTreeNode[];
+  onOpen: (locationId: string) => void;
+  onEdit: (location: Location) => void;
+}) => (
   <ul>
     {nodes.map((node) => (
       <li key={node.location.id}>
         <button onClick={() => onOpen(node.location.id)} aria-label={`Open location ${node.location.name}`}>
           {node.location.name} ({node.location.type})
         </button>
-        {node.children.length > 0 && <LocationTreeList nodes={node.children} onOpen={onOpen} />}
+        <button type="button" onClick={() => onEdit(node.location)} aria-label={`Edit location ${node.location.name}`}>
+          Edit
+        </button>
+        {node.children.length > 0 && <LocationTreeList nodes={node.children} onOpen={onOpen} onEdit={onEdit} />}
       </li>
     ))}
   </ul>
@@ -230,6 +242,7 @@ export function App() {
   const [locationParentId, setLocationParentId] = useState('');
   const [locationDescription, setLocationDescription] = useState('');
   const [locationSortOrder, setLocationSortOrder] = useState('');
+  const [editingLocationId, setEditingLocationId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<GlobalSearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -365,21 +378,51 @@ export function App() {
     setRoute(getItemRoute(path));
   };
 
-  const onCreateLocation = async (event: React.FormEvent) => {
+  const clearLocationForm = () => {
+    setEditingLocationId(null);
+    setLocationName('');
+    setLocationType('House');
+    setLocationParentId('');
+    setLocationDescription('');
+    setLocationSortOrder('');
+  };
+
+  const onEditLocation = (location: Location) => {
+    setEditingLocationId(location.id);
+    setLocationName(location.name);
+    setLocationType(location.type);
+    setLocationParentId(location.parentLocationId ?? '');
+    setLocationDescription(location.description ?? '');
+    setLocationSortOrder(location.sortOrder == null ? '' : String(location.sortOrder));
+    if (route.kind === 'location') {
+      navigate('/locations');
+    }
+  };
+
+  const onSaveLocation = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!locationName.trim()) return;
 
     try {
-      await createLocation(baseUrl, {
+      const payload = {
         name: locationName.trim(),
         type: locationType,
         parentLocationId: locationType === 'House' ? null : locationParentId || null,
         description: toNullableString(locationDescription),
         sortOrder: locationSortOrder ? Number(locationSortOrder) : null
-      });
-      setLocationName('');
-      setLocationDescription('');
-      setLocationSortOrder('');
+      };
+      const saved = editingLocationId
+        ? await updateLocation(baseUrl, editingLocationId, payload)
+        : await createLocation(baseUrl, payload);
+
+      if (selectedLocation?.location.id === saved.id) {
+        setSelectedLocation({
+          ...selectedLocation,
+          location: saved
+        });
+      }
+
+      clearLocationForm();
       setError(null);
       await loadData();
     } catch (e) {
@@ -806,7 +849,7 @@ export function App() {
     StorageUnit: 'Room',
     StorageSlot: 'StorageUnit'
   };
-  const possibleLocationParents = allLocations.filter((location) => location.type === expectedParentType[locationType]);
+  const possibleLocationParents = allLocations.filter((location) => location.type === expectedParentType[locationType] && location.id !== editingLocationId);
   const renderDurableEditor = () => (
     <form onSubmit={onSaveDurableItem} aria-label="Edit durable item">
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'end', marginTop: 12 }}>
@@ -908,11 +951,17 @@ export function App() {
         <section aria-label="Location hierarchy">
           <h2>Location Hierarchy</h2>
           {!isLoading && locationTree.length === 0 && <p>No locations yet.</p>}
-          {locationTree.length > 0 && <LocationTreeList nodes={locationTree} onOpen={(id) => navigate(`/locations/${encodeURIComponent(id)}`)} />}
+          {locationTree.length > 0 && (
+            <LocationTreeList
+              nodes={locationTree}
+              onOpen={(id) => navigate(`/locations/${encodeURIComponent(id)}`)}
+              onEdit={onEditLocation}
+            />
+          )}
         </section>
-        <section aria-label="Create location">
-          <h2>Create Location</h2>
-          <form onSubmit={onCreateLocation} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'end' }}>
+        <section aria-label={editingLocationId ? "Edit location" : "Create location"}>
+          <h2>{editingLocationId ? 'Edit Location' : 'Create Location'}</h2>
+          <form onSubmit={onSaveLocation} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'end' }}>
             <label>
               Name
               <input aria-label="Location name" value={locationName} onChange={(event) => setLocationName(event.target.value)} />
@@ -945,7 +994,8 @@ export function App() {
               Display order
               <input aria-label="Location display order" type="number" min={0} value={locationSortOrder} onChange={(event) => setLocationSortOrder(event.target.value)} />
             </label>
-            <button type="submit">Create Location</button>
+            <button type="submit">{editingLocationId ? 'Save Location' : 'Create Location'}</button>
+            {editingLocationId && <button type="button" onClick={clearLocationForm}>Cancel Location Edit</button>}
           </form>
         </section>
       </main>
@@ -966,6 +1016,7 @@ export function App() {
             <p>{detail.location.type} | ID: {detail.location.id}</p>
             {detail.location.description && <p>{detail.location.description}</p>}
             <p>{detail.childLocationCount} child locations, {detail.consumableCount} consumable lots, {detail.durableItemCount} durable items</p>
+            <button type="button" onClick={() => onEditLocation(detail.location)} aria-label={`Edit location ${detail.location.name}`}>Edit Location</button>
             <h2>Child Locations</h2>
             {detail.children.length === 0 && <p>No child locations.</p>}
             <ul>

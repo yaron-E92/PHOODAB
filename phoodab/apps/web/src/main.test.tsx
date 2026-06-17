@@ -15,6 +15,7 @@ const getDurableItemMock = vi.fn();
 const getLocationTreeMock = vi.fn();
 const getLocationDetailMock = vi.fn();
 const createLocationMock = vi.fn();
+const updateLocationMock = vi.fn();
 const searchPhoodabMock = vi.fn();
 const createConsumableItemMock = vi.fn().mockResolvedValue({ id: 'item-1', name: 'Milk', kind: 'Consumable' });
 const createDurableItemMock = vi.fn();
@@ -51,6 +52,7 @@ vi.mock('../../../packages/api-client/src/client', () => ({
   getLocationTree: getLocationTreeMock,
   getLocationDetail: getLocationDetailMock,
   createLocation: createLocationMock,
+  updateLocation: updateLocationMock,
   searchPhoodab: searchPhoodabMock,
   createConsumableItem: createConsumableItemMock,
   createDurableItem: createDurableItemMock,
@@ -88,6 +90,7 @@ describe('pantry mvp page', () => {
       durableItemCount: 0
     });
     createLocationMock.mockResolvedValue({ id: 'house-1', name: 'Home', type: 'House', parentLocationId: null, description: null, sortOrder: null, isArchived: false });
+    updateLocationMock.mockResolvedValue({ id: 'room-1', name: 'Kitchen pantry', type: 'Room', parentLocationId: 'house-1', description: 'Pantry side', sortOrder: 2, isArchived: false });
     searchPhoodabMock.mockResolvedValue([]);
     getDurableItemMock.mockResolvedValue({
       id: 'durable-1',
@@ -1015,6 +1018,30 @@ describe('pantry mvp page', () => {
     });
     expect(container.textContent).toContain('Home (House)');
     expect(container.textContent).toContain('Kitchen (Room)');
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('button[aria-label="Edit location Kitchen"]')!.click();
+    });
+
+    expect(container.textContent).toContain('Edit Location');
+    await act(async () => {
+      setControlValue(container.querySelector<HTMLInputElement>('input[aria-label="Location name"]')!, 'Kitchen pantry');
+      setControlValue(container.querySelector<HTMLInputElement>('input[aria-label="Location description"]')!, 'Pantry side');
+      setControlValue(container.querySelector<HTMLInputElement>('input[aria-label="Location display order"]')!, '2');
+    });
+
+    await act(async () => {
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Save Location')!.click();
+      await Promise.resolve();
+    });
+
+    expect(updateLocationMock).toHaveBeenCalledWith('http://localhost:5199', 'room-1', {
+      name: 'Kitchen pantry',
+      type: 'Room',
+      parentLocationId: 'house-1',
+      description: 'Pantry side',
+      sortOrder: 2
+    });
 
     await act(async () => {
       container.querySelector<HTMLButtonElement>('button[aria-label="Open location Kitchen"]')!.click();

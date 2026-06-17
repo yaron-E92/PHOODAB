@@ -10,6 +10,8 @@ type DurableItemsResponse = paths['/api/durable-entries']['get']['responses']['2
 type CreateDurableEntryRequest = paths['/api/durable-entries']['post']['requestBody']['content']['application/json'];
 type UpdateDurableEntryRequest = paths['/api/durable-entries/{entryId}']['patch']['requestBody']['content']['application/json'];
 type RetireDurableEntryRequest = paths['/api/durable-entries/{entryId}/retire']['patch']['requestBody']['content']['application/json'];
+type CreateLocationRequest = paths['/api/locations']['post']['requestBody']['content']['application/json'];
+type UpdateLocationRequest = paths['/api/locations/{locationId}']['patch']['requestBody']['content']['application/json'];
 
 export type ItemDefinition = {
   id: string;
@@ -345,7 +347,7 @@ export async function getLocationDetail(baseUrl: string, locationId: string): Pr
 
 export async function createLocation(
   baseUrl: string,
-  payload: { name: string; type: LocationType; parentLocationId: string | null; description: string | null; sortOrder: number | null }
+  payload: CreateLocationRequest
 ): Promise<Location> {
   const response = await fetch(`${baseUrl}/api/locations`, {
     method: 'POST',
@@ -353,5 +355,19 @@ export async function createLocation(
     body: JSON.stringify(payload)
   });
   if (!response.ok) throw new Error(`Create location failed: ${response.status}`);
+  return response.json();
+}
+
+export async function updateLocation(
+  baseUrl: string,
+  locationId: string,
+  payload: UpdateLocationRequest
+): Promise<Location> {
+  const response = await fetch(`${baseUrl}/api/locations/${locationId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) throw new Error(`Update location failed: ${response.status}`);
   return response.json();
 }
