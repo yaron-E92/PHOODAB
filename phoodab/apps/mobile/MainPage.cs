@@ -27,7 +27,7 @@ public sealed class MainPage : ContentPage
     private readonly Entry _quantityEntry = new() { Placeholder = "Quantity", Keyboard = Keyboard.Numeric };
     private readonly Entry _unitEntry = new() { Placeholder = "Unit" };
     private readonly Entry _expiryDateEntry = new() { Placeholder = "Expiry date YYYY-MM-DD (optional)" };
-    private readonly Entry _storageSlotEntry = new() { Placeholder = "Storage slot ID (optional)" };
+    private readonly VerticalStackLayout _entryStorageSlotPicker = new() { Spacing = 6 };
     private readonly Entry _durableNameEntry = new() { Placeholder = "Durable item name" };
     private readonly Entry _durableTypeEntry = new() { Placeholder = "Category or type" };
     private readonly Picker _durableStatusPicker = new() { Title = "Status" };
@@ -40,7 +40,7 @@ public sealed class MainPage : ContentPage
     private readonly Entry _durableWarrantyEntry = new() { Placeholder = "Warranty end YYYY-MM-DD (optional)" };
     private readonly Entry _durableDescriptionEntry = new() { Placeholder = "Description" };
     private readonly Entry _durableNotesEntry = new() { Placeholder = "Notes" };
-    private readonly Entry _durableStorageSlotEntry = new() { Placeholder = "Storage slot ID (optional)" };
+    private readonly VerticalStackLayout _durableStorageSlotPicker = new() { Spacing = 6 };
     private readonly Button _durableSaveButton = new() { Text = "Create Durable Item" };
     private readonly Button _durableCancelButton = new() { Text = "Cancel Durable Edit", IsVisible = false };
     private readonly Entry _locationNameEntry = new() { Placeholder = "Location name" };
@@ -67,11 +67,14 @@ public sealed class MainPage : ContentPage
     private readonly List<ReplenishmentRule> _rules = [];
     private readonly List<LocationItem> _locations = [];
     private readonly List<LocationTreeNodeItem> _locationTree = [];
+    private readonly Dictionary<string, HashSet<string>> _expandedStorageSlotPickerNodeIds = [];
 
     private bool _hasLoaded;
     private PageId _activePage = PageId.Dashboard;
     private string? _editingDurableEntryId;
     private string? _editingLocationId;
+    private string? _selectedEntryStorageSlotId;
+    private string? _selectedDurableStorageSlotId;
     private string? _selectedDurableEntryId;
     private string? _selectedConsumableItemDefinitionId;
     private string _inventoryLocationFilter = "All";
@@ -568,13 +571,14 @@ public sealed class MainPage : ContentPage
     private void AddEntrySection()
     {
         RefreshItemPicker();
+        RefreshStorageSlotPicker(_entryStorageSlotPicker, "new-entry", _selectedEntryStorageSlotId, selectedId => _selectedEntryStorageSlotId = selectedId);
 
         var section = Section("Add Consumable Entry");
         section.Children.Add(_entryItemPicker);
         section.Children.Add(_quantityEntry);
         section.Children.Add(_unitEntry);
         section.Children.Add(_expiryDateEntry);
-        section.Children.Add(_storageSlotEntry);
+        section.Children.Add(_entryStorageSlotPicker);
         section.Children.Add(Button("Add Entry", AddConsumableEntryAsync));
         _dataContent.Children.Add(section);
     }
@@ -582,6 +586,7 @@ public sealed class MainPage : ContentPage
     private void AddDurableFormSection()
     {
         var section = Section("Create Durable Item");
+        RefreshStorageSlotPicker(_durableStorageSlotPicker, "durable-form", _selectedDurableStorageSlotId, selectedId => _selectedDurableStorageSlotId = selectedId);
         section.Children.Add(_durableNameEntry);
         section.Children.Add(GridRows(_durableTypeEntry, _durableStatusPicker));
         section.Children.Add(_durableLocationEntry);
@@ -591,7 +596,7 @@ public sealed class MainPage : ContentPage
         section.Children.Add(_durableWarrantyEntry);
         section.Children.Add(_durableDescriptionEntry);
         section.Children.Add(_durableNotesEntry);
-        section.Children.Add(_durableStorageSlotEntry);
+        section.Children.Add(_durableStorageSlotPicker);
         section.Children.Add(_durableSaveButton);
         section.Children.Add(_durableCancelButton);
         _dataContent.Children.Add(section);
@@ -767,7 +772,9 @@ public sealed class MainPage : ContentPage
         };
         var unit = new Entry { Text = entry.Unit, Placeholder = "Unit" };
         var expiry = new Entry { Text = entry.ExpiresOn ?? string.Empty, Placeholder = "Expiry date YYYY-MM-DD" };
-        var storageSlot = new Entry { Text = entry.StorageSlotId ?? string.Empty, Placeholder = "Storage slot ID" };
+        var selectedStorageSlotId = entry.StorageSlotId;
+        var storageSlotPicker = new VerticalStackLayout { Spacing = 6 };
+        RefreshStorageSlotPicker(storageSlotPicker, $"entry-{entry.EntryId}", selectedStorageSlotId, selectedId => selectedStorageSlotId = selectedId);
         var addStock = new Entry { Placeholder = "Add stock amount", Keyboard = Keyboard.Numeric };
         var addStockUnit = new Entry { Text = entry.Unit, Placeholder = "Add stock unit" };
         var consumeStock = new Entry { Placeholder = "Consume stock amount", Keyboard = Keyboard.Numeric };
@@ -787,9 +794,10 @@ public sealed class MainPage : ContentPage
         layout.Children.Add(GridRows(consumeStock, consumeStockUnit));
         layout.Children.Add(Button("Consume Stock", async () => await AdjustStockAsync(entry, consumeStock.Text, consumeStockUnit.Text, isAdd: false)));
         layout.Children.Add(GridRows(quantity, unit));
-        layout.Children.Add(GridRows(expiry, storageSlot));
+        layout.Children.Add(expiry);
+        layout.Children.Add(storageSlotPicker);
         layout.Children.Add(GridRows(
-            Button("Save Lot", async () => await SaveEntryAsync(entry, quantity.Text, unit.Text, expiry.Text, storageSlot.Text)),
+            Button("Save Lot", async () => await SaveEntryAsync(entry, quantity.Text, unit.Text, expiry.Text, selectedStorageSlotId)),
             Button("Undo Unsaved Changes", async () => await LoadDataAsync())));
 
         return Card(layout, ExpiryColor(entry.ExpiryStatus));
@@ -1041,11 +1049,12 @@ public sealed class MainPage : ContentPage
             return;
         }
 
-        if (!TryParseOptionalDate(_expiryDateEntry.Text, "Expiry date", out var expiresOn) ||
-            !TryParseOptionalGuid(_storageSlotEntry.Text, "Storage slot ID", out var storageSlotId))
+        if (!TryParseOptionalDate(_expiryDateEntry.Text, "Expiry date", out var expiresOn))
         {
             return;
         }
+
+        var storageSlotId = ParseStoredGuid(_selectedEntryStorageSlotId);
 
         try
         {
@@ -1059,7 +1068,7 @@ public sealed class MainPage : ContentPage
             _quantityEntry.Text = string.Empty;
             _unitEntry.Text = string.Empty;
             _expiryDateEntry.Text = string.Empty;
-            _storageSlotEntry.Text = string.Empty;
+            _selectedEntryStorageSlotId = null;
             await LoadDataAsync();
         }
         catch (Exception ex)
@@ -1154,11 +1163,12 @@ public sealed class MainPage : ContentPage
 
         if (!TryParseSelectedDurableStatus(out var status) ||
             !TryParseOptionalDate(_durablePurchaseDateEntry.Text, "Purchase date", out var purchaseDate) ||
-            !TryParseOptionalDate(_durableWarrantyEntry.Text, "Warranty end", out var warrantyEndsOn) ||
-            !TryParseOptionalGuid(_durableStorageSlotEntry.Text, "Storage slot ID", out var storageSlotId))
+            !TryParseOptionalDate(_durableWarrantyEntry.Text, "Warranty end", out var warrantyEndsOn))
         {
             return;
         }
+
+        var storageSlotId = ParseStoredGuid(_selectedDurableStorageSlotId);
 
         var purchaseValue = ParseNullableDecimal(_durablePurchaseValueEntry.Text);
         if (purchaseValue is null && !string.IsNullOrWhiteSpace(_durablePurchaseValueEntry.Text))
@@ -1263,12 +1273,12 @@ public sealed class MainPage : ContentPage
             return;
         }
 
-        if (!TryParseOptionalDate(expiryText, "Expiry date", out var expiresOn) ||
-            !TryParseOptionalGuid(storageSlotText, "Storage slot ID", out var storageSlotId))
+        if (!TryParseOptionalDate(expiryText, "Expiry date", out var expiresOn))
         {
             return;
         }
 
+        var storageSlotId = ParseStoredGuid(storageSlotText);
         await PatchEntryAsync(entry.EntryId, quantity.Value, unit, expiresOn, storageSlotId);
     }
 
@@ -1466,7 +1476,7 @@ public sealed class MainPage : ContentPage
         _durableWarrantyEntry.Text = item.WarrantyEndsOn;
         _durableDescriptionEntry.Text = item.Description;
         _durableNotesEntry.Text = item.Notes;
-        _durableStorageSlotEntry.Text = item.StorageSlotId;
+        _selectedDurableStorageSlotId = item.StorageSlotId;
         _durableSaveButton.Text = "Save Durable Item";
         _durableCancelButton.IsVisible = true;
     }
@@ -1499,7 +1509,7 @@ public sealed class MainPage : ContentPage
         _durableWarrantyEntry.Text = string.Empty;
         _durableDescriptionEntry.Text = string.Empty;
         _durableNotesEntry.Text = string.Empty;
-        _durableStorageSlotEntry.Text = string.Empty;
+        _selectedDurableStorageSlotId = null;
         _durableSaveButton.Text = "Create Durable Item";
         _durableCancelButton.IsVisible = false;
     }
@@ -1527,7 +1537,7 @@ public sealed class MainPage : ContentPage
             _quantityEntry,
             _unitEntry,
             _expiryDateEntry,
-            _storageSlotEntry,
+            _entryStorageSlotPicker,
             _durableNameEntry,
             _durableTypeEntry,
             _durableStatusPicker,
@@ -1540,7 +1550,7 @@ public sealed class MainPage : ContentPage
             _durableWarrantyEntry,
             _durableDescriptionEntry,
             _durableNotesEntry,
-            _durableStorageSlotEntry,
+            _durableStorageSlotPicker,
             _durableSaveButton,
             _durableCancelButton,
             _durableDetailContent,
@@ -1665,6 +1675,100 @@ public sealed class MainPage : ContentPage
 
         var location = _locations.FirstOrDefault(candidate => candidate.Id == locationId);
         return location?.ParentLocationId is not null && IsLocationOrDescendant(location.ParentLocationId, ancestorId);
+    }
+
+    private void RefreshStorageSlotPicker(
+        VerticalStackLayout target,
+        string pickerKey,
+        string? selectedStorageSlotId,
+        Action<string?> onSelected)
+    {
+        target.Children.Clear();
+        target.Children.Add(new Label { Text = "Storage slot", FontAttributes = FontAttributes.Bold });
+        target.Children.Add(new Label { Text = $"Selected: {(string.IsNullOrWhiteSpace(selectedStorageSlotId) ? "No storage slot selected" : DisplayLocation(selectedStorageSlotId))}" });
+        target.Children.Add(Button("No storage slot selected", () =>
+        {
+            onSelected(null);
+            RefreshStorageSlotPicker(target, pickerKey, null, onSelected);
+            return Task.CompletedTask;
+        }));
+
+        if (_locationTree.Count == 0)
+        {
+            target.Children.Add(new Label { Text = "No managed storage slots yet." });
+            return;
+        }
+
+        foreach (var node in _locationTree)
+        {
+            AddStorageSlotTreeNode(target, pickerKey, node, depth: 0, selectedStorageSlotId, onSelected);
+        }
+    }
+
+    private void AddStorageSlotTreeNode(
+        Layout parent,
+        string pickerKey,
+        LocationTreeNodeItem node,
+        int depth,
+        string? selectedStorageSlotId,
+        Action<string?> onSelected)
+    {
+        var isStorageSlot = string.Equals(node.Location.Type, LocationType.StorageSlot.ToString(), StringComparison.OrdinalIgnoreCase);
+        var indent = new Thickness(depth * 16, 0, 0, 4);
+
+        if (isStorageSlot)
+        {
+            var isSelected = node.Location.Id == selectedStorageSlotId;
+            var selectButton = Button($"{(isSelected ? "Selected: " : string.Empty)}{node.Location.Name}", () =>
+            {
+                onSelected(node.Location.Id);
+                RefreshStorageSlotPicker((VerticalStackLayout)parent, pickerKey, node.Location.Id, onSelected);
+                return Task.CompletedTask;
+            });
+            selectButton.Margin = indent;
+            parent.Children.Add(selectButton);
+            return;
+        }
+
+        var isExpanded = StorageSlotPickerExpandedIds(pickerKey).Contains(node.Location.Id);
+        var toggleButton = Button($"{(isExpanded ? "[-]" : "[+]")} {node.Location.Name} ({node.Location.Type})", () =>
+        {
+            ToggleStorageSlotPickerNode(pickerKey, node.Location.Id);
+            RefreshStorageSlotPicker((VerticalStackLayout)parent, pickerKey, selectedStorageSlotId, onSelected);
+            return Task.CompletedTask;
+        });
+        toggleButton.Margin = indent;
+        parent.Children.Add(toggleButton);
+
+        if (!isExpanded)
+        {
+            return;
+        }
+
+        foreach (var child in node.Children)
+        {
+            AddStorageSlotTreeNode(parent, pickerKey, child, depth + 1, selectedStorageSlotId, onSelected);
+        }
+    }
+
+    private HashSet<string> StorageSlotPickerExpandedIds(string pickerKey)
+    {
+        if (!_expandedStorageSlotPickerNodeIds.TryGetValue(pickerKey, out var expandedIds))
+        {
+            expandedIds = [];
+            _expandedStorageSlotPickerNodeIds[pickerKey] = expandedIds;
+        }
+
+        return expandedIds;
+    }
+
+    private void ToggleStorageSlotPickerNode(string pickerKey, string locationId)
+    {
+        var expandedIds = StorageSlotPickerExpandedIds(pickerKey);
+        if (!expandedIds.Add(locationId))
+        {
+            expandedIds.Remove(locationId);
+        }
     }
 
     private decimal? ParseRequiredDecimal(string? value, string fieldName)

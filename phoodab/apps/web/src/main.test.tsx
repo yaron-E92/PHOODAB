@@ -38,6 +38,29 @@ const setCheckboxValue = (control: HTMLInputElement, checked: boolean) => {
   if (control.checked !== checked) control.click();
 };
 
+const storageSlotTree = [
+  {
+    location: { id: 'house-1', name: 'Home', type: 'House', parentLocationId: null, description: null, sortOrder: 1, isArchived: false },
+    children: [
+      {
+        location: { id: 'room-1', name: 'Kitchen', type: 'Room', parentLocationId: 'house-1', description: null, sortOrder: 1, isArchived: false },
+        children: [
+          {
+            location: { id: 'unit-1', name: 'Pantry cabinet', type: 'StorageUnit', parentLocationId: 'room-1', description: null, sortOrder: 1, isArchived: false },
+            children: [
+              { location: { id: 'slot-1', name: 'Top shelf', type: 'StorageSlot', parentLocationId: 'unit-1', description: null, sortOrder: 1, isArchived: false }, children: [] }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+];
+
+const clickByLabel = (scope: ParentNode, ariaLabel: string) => {
+  scope.querySelector<HTMLButtonElement>(`button[aria-label="${ariaLabel}"]`)!.click();
+};
+
 vi.mock('../../../packages/api-client/src/client', () => ({
   getHealth: getHealthMock,
   getVersion: getVersionMock,
@@ -265,6 +288,7 @@ describe('pantry mvp page', () => {
   });
 
   it('creates durable items from the durable item form', async () => {
+    getLocationTreeMock.mockResolvedValue(storageSlotTree);
     const { App } = await import('./main');
 
     const container = document.createElement('div');
@@ -288,6 +312,23 @@ describe('pantry mvp page', () => {
       setControlValue(warrantyInput, '2027-03-01');
     });
 
+    const durableSlotPicker = Array.from(container.querySelectorAll('fieldset'))
+      .find((fieldset) => fieldset.querySelector('legend')?.textContent === 'Durable item storage slot')!;
+    expect(container.querySelector('input[placeholder="Storage slot ID (optional)"]')).toBeNull();
+
+    await act(async () => {
+      clickByLabel(durableSlotPicker, 'Toggle location Home');
+    });
+    await act(async () => {
+      clickByLabel(durableSlotPicker, 'Toggle location Kitchen');
+    });
+    await act(async () => {
+      clickByLabel(durableSlotPicker, 'Toggle location Pantry cabinet');
+    });
+    await act(async () => {
+      clickByLabel(durableSlotPicker, 'Select storage slot Top shelf');
+    });
+
     await act(async () => {
       Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Create Durable Item')!.click();
       await Promise.resolve();
@@ -306,7 +347,7 @@ describe('pantry mvp page', () => {
       status: 'Active',
       currentLocation: 'Hall closet',
       notes: null,
-      storageSlotId: null
+      storageSlotId: 'slot-1'
     });
   });
 
@@ -762,6 +803,7 @@ describe('pantry mvp page', () => {
   });
 
   it('updates consumable entries and refreshes pantry data', async () => {
+    getLocationTreeMock.mockResolvedValue(storageSlotTree);
     getConsumableEntriesMock.mockResolvedValue([
       {
         entryId: 'entry-1',
@@ -796,6 +838,21 @@ describe('pantry mvp page', () => {
       setControlValue(unitInput, 'carton');
     });
 
+    const entrySlotPicker = Array.from(container.querySelectorAll('fieldset'))
+      .find((fieldset) => fieldset.querySelector('legend')?.textContent === 'Entry storage slot for Milk')!;
+    await act(async () => {
+      clickByLabel(entrySlotPicker, 'Toggle location Home');
+    });
+    await act(async () => {
+      clickByLabel(entrySlotPicker, 'Toggle location Kitchen');
+    });
+    await act(async () => {
+      clickByLabel(entrySlotPicker, 'Toggle location Pantry cabinet');
+    });
+    await act(async () => {
+      clickByLabel(entrySlotPicker, 'Select storage slot Top shelf');
+    });
+
     await act(async () => {
       Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Adjust Quantity / Expiry / Location')!.click();
       await Promise.resolve();
@@ -805,7 +862,7 @@ describe('pantry mvp page', () => {
       quantity: 2,
       unit: 'carton',
       expiresOn: null,
-      storageSlotId: null
+      storageSlotId: 'slot-1'
     });
     expect(getInventorySummaryMock).toHaveBeenCalledTimes(2);
   });
