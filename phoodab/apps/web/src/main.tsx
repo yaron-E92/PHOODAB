@@ -96,9 +96,26 @@ const findLocationAncestorIds = (nodes: LocationTreeNode[], targetId: string, an
   return null;
 };
 
-const LocationName = ({ locations, id }: { locations: Location[]; id: string | null | undefined }) => {
+const findLocationPath = (nodes: LocationTreeNode[], targetId: string, path: Location[] = []): Location[] | null => {
+  for (const node of nodes) {
+    const nextPath = [...path, node.location];
+    if (node.location.id === targetId) return nextPath;
+    const childMatch = findLocationPath(node.children, targetId, nextPath);
+    if (childMatch) return childMatch;
+  }
+
+  return null;
+};
+
+const formatLocationPath = (nodes: LocationTreeNode[], id: string | null | undefined) => {
+  if (!id) return 'No location set';
+  return findLocationPath(nodes, id)?.map((location) => location.name).join(' › ') ?? id;
+};
+
+const LocationName = ({ nodes, locations, id }: { nodes: LocationTreeNode[]; locations: Location[]; id: string | null | undefined }) => {
   if (!id) return <>No location set</>;
-  return <>{locations.find((location) => location.id === id)?.name ?? id}</>;
+  const locationPath = findLocationPath(nodes, id);
+  return <>{locationPath?.map((location) => location.name).join(' › ') ?? locations.find((location) => location.id === id)?.name ?? id}</>;
 };
 
 const LocationTreeList = ({
@@ -190,12 +207,12 @@ const StorageSlotTreePicker = ({
     </ul>
   );
 
-  const selectedLocation = flattenLocationTree(nodes).find((location) => location.id === selectedId);
+  const selectedLocationText = formatLocationPath(nodes, selectedId);
 
   return (
     <fieldset style={{ border: '1px solid #ddd', padding: 8 }}>
       <legend>{label}</legend>
-      <div>Selected: {selectedLocation?.name ?? 'No storage slot selected'}</div>
+      <div>Selected: {selectedId ? selectedLocationText : 'No storage slot selected'}</div>
       <button type="button" onClick={() => onSelect('')}>No storage slot selected</button>
       {nodes.length === 0 ? <p>No storage slots yet.</p> : renderNodes(nodes)}
     </fieldset>
@@ -835,10 +852,11 @@ export function App() {
     clearEntryError(entry.entryId);
   };
 
+  const allLocations = flattenLocationTree(locationTree);
   const availableLocations = [...new Set([
     ...consumableEntries.map((entry) => entry.storageSlotId),
     ...durableItems.map((item) => item.currentLocation || item.storageSlotId)
-  ].filter((location): location is string => Boolean(location)))].sort((a, b) => a.localeCompare(b));
+  ].filter((location): location is string => Boolean(location)))].sort((a, b) => formatLocationPath(locationTree, a).localeCompare(formatLocationPath(locationTree, b)));
   const matchesLocation = (location: string | null | undefined) => locationFilter === 'All' || location === locationFilter;
   const visibleDurableItems = durableItems.filter((item) =>
     itemTypeFilter !== 'Consumable'
@@ -904,7 +922,7 @@ export function App() {
         Location
         <select aria-label="Location filter" value={locationFilter} onChange={(event) => setLocationFilter(event.target.value)}>
           <option value="All">All</option>
-          {availableLocations.map((location) => <option key={location} value={location}>{location}</option>)}
+          {availableLocations.map((location) => <option key={location} value={location}>{formatLocationPath(locationTree, location)}</option>)}
         </select>
       </label>
       <label>
@@ -935,7 +953,6 @@ export function App() {
   );
 
   const selectedDurableDetail = selectedDurableItem;
-  const allLocations = flattenLocationTree(locationTree);
   const expectedParentType: Partial<Record<LocationType, LocationType>> = {
     Room: 'House',
     StorageUnit: 'Room',
@@ -1165,7 +1182,7 @@ export function App() {
               {item?.mixedUnitWarning && <p style={{ color: '#9a3412' }}>{item.mixedUnitWarning}</p>}
 
               <h2>Locations</h2>
-              <p>{locations.length > 0 ? locations.map((location) => allLocations.find((candidate) => candidate.id === location)?.name ?? location).join(', ') : 'No location set'}</p>
+              <p>{locations.length > 0 ? locations.map((location) => formatLocationPath(locationTree, location)).join(', ') : 'No location set'}</p>
 
               <h2>Lots / Batches</h2>
               {lots.length === 0 && <p>No lots recorded.</p>}
@@ -1177,7 +1194,7 @@ export function App() {
                     <strong>Lot {entry.entryId}</strong>
                     <div>Quantity: {entry.quantity} {entry.unit}</div>
                     <div>Expiry: {entry.expiresOn ?? 'No expiry'} ({entry.expiryStatus})</div>
-                    <div>Location: <LocationName locations={allLocations} id={entry.storageSlotId} /></div>
+                    <div>Location: <LocationName nodes={locationTree} locations={allLocations} id={entry.storageSlotId} /></div>
                     {entryErrors[entry.entryId] && <p role="alert">{entryErrors[entry.entryId]}</p>}
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
                       <label>
@@ -1295,7 +1312,7 @@ export function App() {
               <div>Serial number: {selectedDurableDetail.serialNumber || 'Not recorded'}</div>
               <h2>Status and Location</h2>
               <div>Status: {selectedDurableDetail.status}</div>
-              <div>Location: {selectedDurableDetail.currentLocation || <LocationName locations={allLocations} id={selectedDurableDetail.storageSlotId} />}</div>
+              <div>Location: {selectedDurableDetail.currentLocation || <LocationName nodes={locationTree} locations={allLocations} id={selectedDurableDetail.storageSlotId} />}</div>
               <h2>Purchase and Warranty</h2>
               <div>Purchase date: {selectedDurableDetail.purchaseDate || 'Not recorded'}</div>
               <div>Purchase value: {selectedDurableDetail.purchaseValue ?? 'Not recorded'}</div>
@@ -1471,7 +1488,7 @@ export function App() {
         <ul>
           {visibleDurableItems.map((item) => {
             const name = getDurableDisplayName(item);
-            const location = item.currentLocation || allLocations.find((candidate) => candidate.id === item.storageSlotId)?.name || item.storageSlotId || 'No location set';
+            const location = item.currentLocation || formatLocationPath(locationTree, item.storageSlotId);
             return (
               <li key={item.id ?? `${name}-${item.itemDefinitionId ?? ''}`} style={{ marginBottom: 12 }}>
                 <strong>{name}</strong>: {item.itemType || 'Uncategorized'} [{item.status}]
@@ -1521,7 +1538,7 @@ export function App() {
             const edit = entryEdits[entry.entryId] ?? toEntryEdit(entry);
             const actionEdit = entryActionEdits[entry.entryId] ?? toEntryActionEdit(entry);
             const expiryStyle = getExpiryStyle(entry.expiryStatus);
-            const lotLocation = allLocations.find((location) => location.id === entry.storageSlotId)?.name || entry.storageSlotId || 'No location set';
+            const lotLocation = formatLocationPath(locationTree, entry.storageSlotId);
             return (
               <li
                 key={entry.entryId}

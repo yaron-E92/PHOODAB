@@ -785,7 +785,7 @@ public sealed class MainPage : ContentPage
         layout.Children.Add(new Label { Text = $"Lot {entry.EntryId}" });
         layout.Children.Add(new Label
         {
-            Text = $"Quantity: {entry.Quantity.ToString(CultureInfo.InvariantCulture)} {entry.Unit} | Expiry: {entry.ExpiresOn ?? "No expiry"} ({entry.ExpiryStatus}) | Location: {entry.StorageSlotId ?? "No location set"}"
+            Text = $"Quantity: {entry.Quantity.ToString(CultureInfo.InvariantCulture)} {entry.Unit} | Expiry: {entry.ExpiresOn ?? "No expiry"} ({entry.ExpiryStatus}) | Location: {DisplayLocation(entry.StorageSlotId)}"
         });
         layout.Children.Add(GridRows(addStock, addStockUnit));
         layout.Children.Add(GridRows(
@@ -2072,7 +2072,43 @@ public sealed class MainPage : ContentPage
             return "No location set";
         }
 
-        return _locations.FirstOrDefault(candidate => candidate.Id == location)?.Name ?? location;
+        return TryFormatLocationPath(location, out var path) ? path : location;
+    }
+
+    private bool TryFormatLocationPath(string locationId, out string path)
+    {
+        foreach (var node in _locationTree)
+        {
+            if (TryBuildLocationPath(node, locationId, [], out var names))
+            {
+                path = string.Join(" › ", names);
+                return true;
+            }
+        }
+
+        path = string.Empty;
+        return false;
+    }
+
+    private static bool TryBuildLocationPath(LocationTreeNodeItem node, string locationId, List<string> parentNames, out List<string> names)
+    {
+        var nextNames = parentNames.Append(node.Location.Name).ToList();
+        if (node.Location.Id == locationId)
+        {
+            names = nextNames;
+            return true;
+        }
+
+        foreach (var child in node.Children)
+        {
+            if (TryBuildLocationPath(child, locationId, nextNames, out names))
+            {
+                return true;
+            }
+        }
+
+        names = [];
+        return false;
     }
 
     private static string WarrantyIndicator(DurableItem item)

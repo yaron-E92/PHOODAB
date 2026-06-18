@@ -527,6 +527,7 @@ describe('pantry mvp page', () => {
   });
 
   it('renders backend-provided expiryStatus and replenishment breakdown values', async () => {
+    getLocationTreeMock.mockResolvedValue(storageSlotTree);
     getInventorySummaryMock.mockResolvedValue([
       {
         itemDefinitionId: 'item-1',
@@ -600,7 +601,7 @@ describe('pantry mvp page', () => {
     expect(container.textContent).toContain('Milk');
     expect(container.textContent).toContain('Lot entry-1');
     expect(container.textContent).toContain('Expired');
-    expect(container.textContent).toContain('slot-1');
+    expect(container.textContent).toContain('Home › Kitchen › Pantry cabinet › Top shelf');
   });
 
   it('uses backend suggested purchase amount and source context when adding a suggestion to shopping list', async () => {
@@ -869,6 +870,7 @@ describe('pantry mvp page', () => {
 
   it('offers lot actions for adding, consuming, depleting, editing expiry, and moving location', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
+    getLocationTreeMock.mockResolvedValue(storageSlotTree);
     getConsumableEntriesMock.mockResolvedValue([
       {
         entryId: 'entry-1',
@@ -896,7 +898,7 @@ describe('pantry mvp page', () => {
 
     expect(container.textContent).toContain('Lot entry-1');
     expect(container.textContent).toContain('Expiry: 2026-06-10 (Safe)');
-    expect(container.textContent).toContain('Location: slot-1');
+    expect(container.textContent).toContain('Location: Home › Kitchen › Pantry cabinet › Top shelf');
     expect(container.textContent).toContain('Add stock');
     expect(container.textContent).toContain('Consume stock');
     expect(container.textContent).toContain('Add stock unit');
