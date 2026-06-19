@@ -1110,7 +1110,9 @@ describe('pantry mvp page', () => {
     expect(getLocationDetailMock).toHaveBeenCalledWith('http://localhost:5199', 'room-1');
     expect(container.textContent).toContain('1 child locations, 1 consumable lots, 1 durable items');
     expect(container.textContent).toContain('Peas: 2 bag');
+    expect(container.textContent).toContain('Location: Home › Kitchen › Freezer');
     expect(container.textContent).toContain('Ice maker (Active)');
+    expect(container.textContent).not.toContain('Location: unit-1');
   });
 
   it('shows basic error state', async () => {

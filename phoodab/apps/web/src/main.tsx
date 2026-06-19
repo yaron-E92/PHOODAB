@@ -112,10 +112,28 @@ const formatLocationPath = (nodes: LocationTreeNode[], id: string | null | undef
   return findLocationPath(nodes, id)?.map((location) => location.name).join(' › ') ?? id;
 };
 
+const formatLocationPathFromKnownLocations = (nodes: LocationTreeNode[], locations: Location[], id: string | null | undefined) => {
+  if (!id) return 'No location set';
+
+  const treePath = findLocationPath(nodes, id);
+  if (treePath) return treePath.map((location) => location.name).join(' › ');
+
+  const byId = new Map([...flattenLocationTree(nodes), ...locations].map((location) => [location.id, location]));
+  const names: string[] = [];
+  const seen = new Set<string>();
+  let current = byId.get(id);
+
+  while (current && !seen.has(current.id)) {
+    seen.add(current.id);
+    names.unshift(current.name);
+    current = current.parentLocationId ? byId.get(current.parentLocationId) : undefined;
+  }
+
+  return names.length > 0 ? names.join(' › ') : id;
+};
+
 const LocationName = ({ nodes, locations, id }: { nodes: LocationTreeNode[]; locations: Location[]; id: string | null | undefined }) => {
-  if (!id) return <>No location set</>;
-  const locationPath = findLocationPath(nodes, id);
-  return <>{locationPath?.map((location) => location.name).join(' › ') ?? locations.find((location) => location.id === id)?.name ?? id}</>;
+  return <>{formatLocationPathFromKnownLocations(nodes, locations, id)}</>;
 };
 
 const LocationTreeList = ({
@@ -1118,6 +1136,7 @@ export function App() {
 
   if (route.kind === 'location') {
     const detail = selectedLocation;
+    const detailLocations = detail ? [detail.location, ...detail.children, ...allLocations] : allLocations;
     return (
       <main style={{ fontFamily: 'system-ui', padding: 16 }}>
         <button onClick={() => navigate('/locations')} aria-label="Back to locations">Back to Locations</button>
@@ -1142,10 +1161,24 @@ export function App() {
             </ul>
             <h2>Consumables Stored Here</h2>
             {detail.consumables.length === 0 && <p>No consumables stored here.</p>}
-            <ul>{detail.consumables.map((entry) => <li key={entry.entryId}>{entry.itemName}: {entry.quantity} {entry.unit}</li>)}</ul>
+            <ul>
+              {detail.consumables.map((entry) => (
+                <li key={entry.entryId}>
+                  {entry.itemName}: {entry.quantity} {entry.unit}
+                  <div>Location: <LocationName nodes={locationTree} locations={detailLocations} id={entry.storageSlotId} /></div>
+                </li>
+              ))}
+            </ul>
             <h2>Durable Items Stored Here</h2>
             {detail.durableItems.length === 0 && <p>No durable items stored here.</p>}
-            <ul>{detail.durableItems.map((item) => <li key={item.id}>{getDurableDisplayName(item)} ({item.status})</li>)}</ul>
+            <ul>
+              {detail.durableItems.map((item) => (
+                <li key={item.id}>
+                  {getDurableDisplayName(item)} ({item.status})
+                  <div>Location: {item.currentLocation || <LocationName nodes={locationTree} locations={detailLocations} id={item.storageSlotId} />}</div>
+                </li>
+              ))}
+            </ul>
           </section>
         )}
       </main>
