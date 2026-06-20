@@ -6,6 +6,7 @@ public abstract class InventoryEntry
     public Guid ItemDefinitionId { get; }
     public ItemDefinition ItemDefinition { get; }
     public Guid? StorageSlotId { get; }
+    public Guid? LocationId => StorageSlotId;
     public abstract ItemKind Kind { get; }
 
     protected InventoryEntry(Guid id, ItemDefinition itemDefinition, Guid? storageSlotId = null)

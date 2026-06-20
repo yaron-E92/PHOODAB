@@ -53,6 +53,13 @@ public interface IInventoryMvpStore
     bool DeleteShoppingListItem(Guid shoppingListItemId);
     IReadOnlyList<object> GetShoppingListItems();
     IReadOnlyList<GlobalSearchResultReadModel> Search(string query, int limit = 20);
+    IReadOnlyList<LocationReadModel> GetLocations(bool includeArchived = false);
+    LocationReadModel? GetLocation(Guid locationId);
+    IReadOnlyList<LocationTreeNodeReadModel> GetLocationTree();
+    LocationDetailReadModel? GetLocationDetail(Guid locationId, DateOnly todayUtc);
+    LocationReadModel CreateLocation(string name, LocationType type, Guid? parentLocationId, string? description, int? sortOrder);
+    LocationReadModel? UpdateLocation(Guid locationId, string name, LocationType type, Guid? parentLocationId, string? description, int? sortOrder);
+    LocationArchiveResult ArchiveLocation(Guid locationId);
 }
 
 public sealed class FileInventoryMvpStore : IInventoryMvpStore
@@ -113,6 +120,7 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
         lock (_sync)
         {
             var state = LoadState();
+            ValidateAssignedLocation(state, storageSlotId);
             var item = new ItemDefinition(Guid.NewGuid(), displayName, ItemKind.Durable);
             var entry = new DurableEntry(
                 Guid.NewGuid(),
@@ -142,6 +150,7 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
         lock (_sync)
         {
             var state = LoadState();
+            ValidateAssignedLocation(state, storageSlotId);
             var itemState = state.ItemDefinitions.SingleOrDefault(i => i.Id == itemDefinitionId);
             if (itemState is null || itemState.Kind != ItemKind.Durable)
             {
@@ -194,6 +203,7 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
         lock (_sync)
         {
             var state = LoadState();
+            ValidateAssignedLocation(state, storageSlotId);
             var existing = state.DurableEntries.SingleOrDefault(entry => entry.Id == entryId);
             if (existing is null)
             {
@@ -268,6 +278,7 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
         lock (_sync)
         {
             var state = LoadState();
+            ValidateAssignedLocation(state, storageSlotId);
             var itemState = state.ItemDefinitions.SingleOrDefault(i => i.Id == itemDefinitionId);
             if (itemState is null || itemState.Kind != ItemKind.Consumable)
             {
@@ -331,6 +342,7 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
         lock (_sync)
         {
             var state = LoadState();
+            ValidateAssignedLocation(state, storageSlotId);
             var existing = state.ConsumableEntries.SingleOrDefault(e => e.Id == entryId);
             if (existing is null)
             {
@@ -514,6 +526,166 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
         }
     }
 
+    public IReadOnlyList<LocationReadModel> GetLocations(bool includeArchived = false)
+    {
+        lock (_sync)
+        {
+            var state = LoadState();
+            return state.Locations
+                .Where(location => includeArchived || !location.IsArchived)
+                .OrderBy(location => location.SortOrder ?? int.MaxValue)
+                .ThenBy(location => location.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(ToLocationReadModel)
+                .ToList();
+        }
+    }
+
+    public LocationReadModel? GetLocation(Guid locationId)
+    {
+        lock (_sync)
+        {
+            var location = LoadState().Locations.SingleOrDefault(candidate => candidate.Id == locationId);
+            return location is null ? null : ToLocationReadModel(location);
+        }
+    }
+
+    public IReadOnlyList<LocationTreeNodeReadModel> GetLocationTree()
+    {
+        lock (_sync)
+        {
+            var activeLocations = LoadState().Locations.Where(location => !location.IsArchived).ToList();
+            return activeLocations
+                .Where(location => location.ParentLocationId is null)
+                .OrderBy(location => location.SortOrder ?? int.MaxValue)
+                .ThenBy(location => location.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(location => BuildLocationTreeNode(location, activeLocations))
+                .ToList();
+        }
+    }
+
+    public LocationDetailReadModel? GetLocationDetail(Guid locationId, DateOnly todayUtc)
+    {
+        lock (_sync)
+        {
+            var state = LoadState();
+            var location = state.Locations.SingleOrDefault(candidate => candidate.Id == locationId);
+            if (location is null)
+            {
+                return null;
+            }
+
+            var children = state.Locations
+                .Where(child => child.ParentLocationId == locationId && !child.IsArchived)
+                .OrderBy(child => child.SortOrder ?? int.MaxValue)
+                .ThenBy(child => child.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(ToLocationReadModel)
+                .ToList();
+            var locationIds = GetDescendantLocationIds(locationId, state.Locations);
+            var consumables = state.ConsumableEntries
+                .Where(entry => entry.StorageSlotId.HasValue && locationIds.Contains(entry.StorageSlotId.Value))
+                .Select(entry => ToConsumableEntryReadModel(state, entry, todayUtc))
+                .ToList();
+            var durables = state.DurableEntries
+                .Where(entry => entry.StorageSlotId.HasValue && locationIds.Contains(entry.StorageSlotId.Value))
+                .Select(entry => ToDurableItemReadModel(state, entry))
+                .ToList();
+
+            return new LocationDetailReadModel(
+                ToLocationReadModel(location),
+                children,
+                consumables,
+                durables,
+                children.Count,
+                consumables.Count,
+                durables.Count);
+        }
+    }
+
+    public LocationReadModel CreateLocation(string name, LocationType type, Guid? parentLocationId, string? description, int? sortOrder)
+    {
+        lock (_sync)
+        {
+            var state = LoadState();
+            var location = CreateLocationDomain(state, Guid.NewGuid(), name, type, parentLocationId, description, sortOrder, false);
+            var persisted = ToLocationState(location);
+            state.Locations.Add(persisted);
+            SaveState(state);
+            return ToLocationReadModel(persisted);
+        }
+    }
+
+    public LocationReadModel? UpdateLocation(Guid locationId, string name, LocationType type, Guid? parentLocationId, string? description, int? sortOrder)
+    {
+        lock (_sync)
+        {
+            var state = LoadState();
+            var existing = state.Locations.SingleOrDefault(location => location.Id == locationId);
+            if (existing is null)
+            {
+                return null;
+            }
+
+            if (parentLocationId == locationId)
+            {
+                throw new InvalidOperationException("A location cannot be its own parent.");
+            }
+
+            var expectedChildType = type switch
+            {
+                LocationType.House => LocationType.Room,
+                LocationType.Room => LocationType.StorageUnit,
+                LocationType.StorageUnit => LocationType.StorageSlot,
+                LocationType.StorageSlot => (LocationType?)null,
+                _ => null
+            };
+            if (state.Locations.Any(child => child.ParentLocationId == locationId && !child.IsArchived && child.Type != expectedChildType))
+            {
+                throw new InvalidOperationException("Location type cannot be changed because its active children would violate the hierarchy.");
+            }
+
+            var location = CreateLocationDomain(state, locationId, name, type, parentLocationId, description, sortOrder, existing.IsArchived);
+            var updated = ToLocationState(location);
+            state.Locations.Remove(existing);
+            state.Locations.Add(updated);
+            SaveState(state);
+            return ToLocationReadModel(updated);
+        }
+    }
+
+    public LocationArchiveResult ArchiveLocation(Guid locationId)
+    {
+        lock (_sync)
+        {
+            var state = LoadState();
+            var existing = state.Locations.SingleOrDefault(location => location.Id == locationId);
+            if (existing is null)
+            {
+                return LocationArchiveResult.NotFound;
+            }
+
+            if (existing.IsArchived)
+            {
+                return LocationArchiveResult.Archived;
+            }
+
+            if (state.Locations.Any(location => location.ParentLocationId == locationId && !location.IsArchived))
+            {
+                return LocationArchiveResult.HasChildren;
+            }
+
+            if (state.ConsumableEntries.Any(entry => entry.StorageSlotId == locationId && entry.Quantity > 0) ||
+                state.DurableEntries.Any(entry => entry.StorageSlotId == locationId && entry.Status != DurableItemStatus.Retired))
+            {
+                return LocationArchiveResult.HasItems;
+            }
+
+            state.Locations.Remove(existing);
+            state.Locations.Add(existing with { IsArchived = true });
+            SaveState(state);
+            return LocationArchiveResult.Archived;
+        }
+    }
+
     public IReadOnlyList<GlobalSearchResultReadModel> Search(string query, int limit = 20)
     {
         if (string.IsNullOrWhiteSpace(query) || limit <= 0)
@@ -546,7 +718,18 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
                     entry.CurrentLocation ?? entry.StorageSlotId?.ToString(),
                     entry.Status.ToString())));
 
-            var locations = state.ConsumableEntries
+            results.AddRange(state.Locations
+                .Where(location => !location.IsArchived &&
+                    (Contains(location.Name, term) || Contains(location.Description, term)))
+                .Select(location => new GlobalSearchResultReadModel(
+                    "location",
+                    "Location",
+                    location.Id.ToString(),
+                    location.Name,
+                    null,
+                    location.Type.ToString())));
+
+            var legacyLocations = state.ConsumableEntries
                 .Select(entry => entry.StorageSlotId?.ToString())
                 .Concat(state.DurableEntries.Select(entry => entry.CurrentLocation))
                 .Concat(state.DurableEntries.Select(entry => entry.StorageSlotId?.ToString()))
@@ -555,7 +738,7 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .Where(location => Contains(location, term));
 
-            results.AddRange(locations.Select(location => new GlobalSearchResultReadModel(
+            results.AddRange(legacyLocations.Select(location => new GlobalSearchResultReadModel(
                 "location",
                 "Location",
                 location,
@@ -600,6 +783,90 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
         }
     }
 
+    private static Location CreateLocationDomain(
+        InventoryMvpState state,
+        Guid id,
+        string name,
+        LocationType type,
+        Guid? parentLocationId,
+        string? description,
+        int? sortOrder,
+        bool isArchived)
+    {
+        LocationState? parent = null;
+        if (parentLocationId.HasValue)
+        {
+            parent = state.Locations.SingleOrDefault(location => location.Id == parentLocationId.Value && !location.IsArchived)
+                ?? throw new ArgumentException("Parent location was not found or is archived.", nameof(parentLocationId));
+        }
+
+        return new Location(id, name, type, parentLocationId, parent?.Type, description, sortOrder, isArchived);
+    }
+
+    private static void ValidateAssignedLocation(InventoryMvpState state, Guid? locationId)
+    {
+        if (!locationId.HasValue || state.Locations.Count == 0)
+        {
+            return;
+        }
+
+        if (state.Locations.All(location => location.Id != locationId.Value || location.IsArchived))
+        {
+            throw new ArgumentException("Location must reference an active managed location.", nameof(locationId));
+        }
+    }
+
+    private static HashSet<Guid> GetDescendantLocationIds(Guid locationId, IReadOnlyList<LocationState> locations)
+    {
+        // Breadth-first traversal; location hierarchy is not binary, so in/pre/post-order labels do not apply.
+        var result = new HashSet<Guid> { locationId };
+        var pending = new Queue<Guid>();
+        pending.Enqueue(locationId);
+
+        while (pending.Count > 0)
+        {
+            var parentId = pending.Dequeue();
+            foreach (var child in locations.Where(location => location.ParentLocationId == parentId && !location.IsArchived))
+            {
+                if (result.Add(child.Id))
+                {
+                    pending.Enqueue(child.Id);
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private static LocationTreeNodeReadModel BuildLocationTreeNode(LocationState location, IReadOnlyList<LocationState> activeLocations)
+    {
+        var children = activeLocations
+            .Where(child => child.ParentLocationId == location.Id)
+            .OrderBy(child => child.SortOrder ?? int.MaxValue)
+            .ThenBy(child => child.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(child => BuildLocationTreeNode(child, activeLocations))
+            .ToList();
+        return new LocationTreeNodeReadModel(ToLocationReadModel(location), children);
+    }
+
+    private static LocationState ToLocationState(Location location) => new(
+        location.Id,
+        location.Name,
+        location.Type,
+        location.ParentLocationId,
+        location.Description,
+        location.SortOrder,
+        location.IsArchived);
+
+    private static LocationReadModel ToLocationReadModel(LocationState location) => new(
+        location.Id,
+        location.Name,
+        location.Type.ToString(),
+        location.ParentLocationId,
+        location.Description,
+        location.SortOrder,
+        location.IsArchived);
+
     private InventoryMvpState LoadState()
     {
         if (!File.Exists(_storePath))
@@ -635,6 +902,7 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
         public List<ConsumableEntryState> ConsumableEntries { get; set; } = [];
         public List<ReplenishmentRuleState> Rules { get; set; } = [];
         public List<ShoppingListItemState> ShoppingListItems { get; set; } = [];
+        public List<LocationState> Locations { get; set; } = [];
     }
 
     private static void SeedItem(InventoryMvpState state, string name, decimal quantity, string unit, DateOnly? expiresOn)
@@ -874,6 +1142,7 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
     private sealed record ConsumableEntryState(Guid Id, Guid ItemDefinitionId, decimal Quantity, string Unit, DateOnly? ExpiresOn, Guid? StorageSlotId);
     private sealed record ReplenishmentRuleState(Guid Id, Guid ItemDefinitionId, decimal? TargetAmount, string? Unit, int? ExpiryWarningDays, bool IsHidden, bool? IsDisabled);
     private sealed record ShoppingListItemState(Guid Id, Guid ItemDefinitionId, string ItemName, decimal Quantity, string Unit, bool IsResolved, bool IsPurchased, string? Status = null, decimal? SourceDeficitAmount = null, decimal? SourceExpiringSoonAmount = null, decimal? SourceSuggestedPurchaseAmount = null);
+    private sealed record LocationState(Guid Id, string Name, LocationType Type, Guid? ParentLocationId, string? Description, int? SortOrder, bool IsArchived);
 }
 
 public sealed record DurableItemReadModel(
@@ -891,7 +1160,40 @@ public sealed record DurableItemReadModel(
     string Status,
     string? CurrentLocation,
     string? Notes,
-    Guid? StorageSlotId);
+    Guid? StorageSlotId)
+{
+    public Guid? LocationId => StorageSlotId;
+}
+
+public enum LocationArchiveResult
+{
+    Archived,
+    NotFound,
+    HasChildren,
+    HasItems
+}
+
+public sealed record LocationReadModel(
+    Guid Id,
+    string Name,
+    string Type,
+    Guid? ParentLocationId,
+    string? Description,
+    int? SortOrder,
+    bool IsArchived);
+
+public sealed record LocationTreeNodeReadModel(
+    LocationReadModel Location,
+    IReadOnlyList<LocationTreeNodeReadModel> Children);
+
+public sealed record LocationDetailReadModel(
+    LocationReadModel Location,
+    IReadOnlyList<LocationReadModel> Children,
+    IReadOnlyList<ConsumableEntryReadModel> Consumables,
+    IReadOnlyList<DurableItemReadModel> DurableItems,
+    int ChildLocationCount,
+    int ConsumableCount,
+    int DurableItemCount);
 
 public sealed record GlobalSearchResultReadModel(
     string Kind,

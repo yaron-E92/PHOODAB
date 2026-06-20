@@ -27,7 +27,7 @@ public sealed class MainPage : ContentPage
     private readonly Entry _quantityEntry = new() { Placeholder = "Quantity", Keyboard = Keyboard.Numeric };
     private readonly Entry _unitEntry = new() { Placeholder = "Unit" };
     private readonly Entry _expiryDateEntry = new() { Placeholder = "Expiry date YYYY-MM-DD (optional)" };
-    private readonly Entry _storageSlotEntry = new() { Placeholder = "Storage slot ID (optional)" };
+    private readonly VerticalStackLayout _entryStorageSlotPicker = new() { Spacing = 6 };
     private readonly Entry _durableNameEntry = new() { Placeholder = "Durable item name" };
     private readonly Entry _durableTypeEntry = new() { Placeholder = "Category or type" };
     private readonly Picker _durableStatusPicker = new() { Title = "Status" };
@@ -40,9 +40,16 @@ public sealed class MainPage : ContentPage
     private readonly Entry _durableWarrantyEntry = new() { Placeholder = "Warranty end YYYY-MM-DD (optional)" };
     private readonly Entry _durableDescriptionEntry = new() { Placeholder = "Description" };
     private readonly Entry _durableNotesEntry = new() { Placeholder = "Notes" };
-    private readonly Entry _durableStorageSlotEntry = new() { Placeholder = "Storage slot ID (optional)" };
+    private readonly VerticalStackLayout _durableStorageSlotPicker = new() { Spacing = 6 };
     private readonly Button _durableSaveButton = new() { Text = "Create Durable Item" };
     private readonly Button _durableCancelButton = new() { Text = "Cancel Durable Edit", IsVisible = false };
+    private readonly Entry _locationNameEntry = new() { Placeholder = "Location name" };
+    private readonly Picker _locationTypePicker = new() { Title = "Location type" };
+    private readonly Picker _locationParentPicker = new() { Title = "Parent location" };
+    private readonly Entry _locationDescriptionEntry = new() { Placeholder = "Description (optional)" };
+    private readonly Entry _locationSortOrderEntry = new() { Placeholder = "Display order (optional)", Keyboard = Keyboard.Numeric };
+    private readonly Button _locationSaveButton = new() { Text = "Create Location" };
+    private readonly Button _locationCancelButton = new() { Text = "Cancel Location Edit", IsVisible = false };
     private readonly VerticalStackLayout _content = new() { Spacing = 16, Padding = 16 };
     private readonly FlexLayout _navigation = new() { Direction = FlexDirection.Row, Wrap = FlexWrap.Wrap, AlignItems = FlexAlignItems.Stretch };
     private readonly Label _pageTitleLabel = new() { FontSize = 24, FontAttributes = FontAttributes.Bold, TextColor = Colors.Black };
@@ -58,10 +65,16 @@ public sealed class MainPage : ContentPage
     private readonly List<ReplenishmentSuggestion> _suggestions = [];
     private readonly List<ShoppingListItem> _shoppingListItems = [];
     private readonly List<ReplenishmentRule> _rules = [];
+    private readonly List<LocationItem> _locations = [];
+    private readonly List<LocationTreeNodeItem> _locationTree = [];
+    private readonly Dictionary<string, HashSet<string>> _expandedStorageSlotPickerNodeIds = [];
 
     private bool _hasLoaded;
     private PageId _activePage = PageId.Dashboard;
     private string? _editingDurableEntryId;
+    private string? _editingLocationId;
+    private string? _selectedEntryStorageSlotId;
+    private string? _selectedDurableStorageSlotId;
     private string? _selectedDurableEntryId;
     private string? _selectedConsumableItemDefinitionId;
     private string _inventoryLocationFilter = "All";
@@ -86,6 +99,11 @@ public sealed class MainPage : ContentPage
         _durableStatusPicker.SelectedItem = DurableItemStatus.Active.ToString();
         _durableSaveButton.Clicked += async (_, _) => await SaveDurableItemAsync();
         _durableCancelButton.Clicked += (_, _) => ClearDurableForm();
+        _locationTypePicker.ItemsSource = Enum.GetNames<LocationType>().ToList();
+        _locationTypePicker.SelectedItem = LocationType.House.ToString();
+        _locationTypePicker.SelectedIndexChanged += (_, _) => RefreshLocationParentPicker();
+        _locationSaveButton.Clicked += async (_, _) => await SaveLocationAsync();
+        _locationCancelButton.Clicked += (_, _) => ClearLocationForm();
         _searchEntry.ReturnType = ReturnType.Search;
         _searchEntry.Completed += async (_, _) => await SearchAsync();
         SemanticProperties.SetDescription(_searchEntry, "Search all PHOODAB items, locations, and shopping entries");
@@ -405,10 +423,34 @@ public sealed class MainPage : ContentPage
 
     private void AddLocationsSection()
     {
-        var section = Section("Locations");
+        var manageSection = Section(_editingLocationId is null ? "Create Location" : "Edit Location");
+        RefreshLocationParentPicker();
+        manageSection.Children.Add(_locationNameEntry);
+        manageSection.Children.Add(GridRows(_locationTypePicker, _locationParentPicker));
+        manageSection.Children.Add(_locationDescriptionEntry);
+        manageSection.Children.Add(_locationSortOrderEntry);
+        manageSection.Children.Add(GridRows(_locationSaveButton, _locationCancelButton));
+        _dataContent.Children.Add(manageSection);
+
+        var hierarchySection = Section("Location Hierarchy");
+        if (_locationTree.Count == 0)
+        {
+            hierarchySection.Children.Add(new Label { Text = "No managed locations yet." });
+        }
+        else
+        {
+            foreach (var node in _locationTree)
+            {
+                AddLocationTreeNode(hierarchySection, node, depth: 0);
+            }
+        }
+
+        _dataContent.Children.Add(hierarchySection);
+
+        var section = Section("Inventory by Location");
         var rows = _consumableEntries
             .Where(entry => !string.IsNullOrWhiteSpace(entry.StorageSlotId))
-            .Select(entry => (Type: "Consumable", Location: entry.StorageSlotId!, Title: $"{entry.ItemName} lot {entry.EntryId}", Detail: $"{entry.Quantity.ToString(CultureInfo.InvariantCulture)} {entry.Unit}"))
+            .Select(entry => (Type: "Consumable", Location: DisplayLocation(entry.StorageSlotId), Title: $"{entry.ItemName} lot {entry.EntryId}", Detail: $"{entry.Quantity.ToString(CultureInfo.InvariantCulture)} {entry.Unit}"))
             .Concat(_durableItems
                 .Where(item => !string.IsNullOrWhiteSpace(item.CurrentLocation) || !string.IsNullOrWhiteSpace(item.StorageSlotId))
                 .Select(item => (Type: "Durable Item", Location: DurableLocation(item), Title: item.DisplayName, Detail: $"{DurableType(item)} [{item.Status}]")))
@@ -435,6 +477,35 @@ public sealed class MainPage : ContentPage
         _dataContent.Children.Add(section);
     }
 
+    private void AddLocationTreeNode(Layout section, LocationTreeNodeItem node, int depth)
+    {
+        var layout = new VerticalStackLayout { Spacing = 4, Margin = new Thickness(depth * 16, 0, 0, 8) };
+        layout.Children.Add(new Label
+        {
+            Text = $"{node.Location.Name} ({node.Location.Type})",
+            FontAttributes = FontAttributes.Bold
+        });
+
+        if (!string.IsNullOrWhiteSpace(node.Location.Description))
+        {
+            layout.Children.Add(new Label { Text = node.Location.Description, TextColor = Colors.DarkSlateGray });
+        }
+
+        var actions = new HorizontalStackLayout { Spacing = 8 };
+        actions.Children.Add(Button("Edit", () =>
+        {
+            StartLocationEdit(node.Location);
+            return Task.CompletedTask;
+        }));
+        layout.Children.Add(actions);
+        section.Children.Add(Card(layout));
+
+        foreach (var child in node.Children)
+        {
+            AddLocationTreeNode(section, child, depth + 1);
+        }
+    }
+
     private async Task LoadDataAsync()
     {
         SetStatus("Loading pantry data...", isError: false);
@@ -452,6 +523,8 @@ public sealed class MainPage : ContentPage
             Replace(_suggestions, snapshot.Suggestions);
             Replace(_shoppingListItems, snapshot.ShoppingListItems);
             Replace(_rules, snapshot.Rules);
+            Replace(_locations, snapshot.Locations);
+            Replace(_locationTree, snapshot.LocationTree);
             SetStatus(string.Empty, isError: false);
         }
         catch (Exception ex)
@@ -460,6 +533,7 @@ public sealed class MainPage : ContentPage
         }
 
         RefreshItemPicker();
+        RefreshLocationParentPicker();
         RebuildDataSections();
     }
 
@@ -478,7 +552,9 @@ public sealed class MainPage : ContentPage
                 _store.GetExpiringConsumableEntries(todayUtc).Select(ToMobileEntry).ToList(),
                 _suggestionService.GetSuggestions(rules, entries).Select(ToMobileSuggestion).ToList(),
                 ProjectList<ShoppingListItem>(_store.GetShoppingListItems()),
-                rules.Select(ToMobileRule).ToList());
+                rules.Select(ToMobileRule).ToList(),
+                _store.GetLocations().Select(ToMobileLocation).ToList(),
+                _store.GetLocationTree().Select(ToMobileLocationTreeNode).ToList());
         });
     }
 
@@ -495,13 +571,14 @@ public sealed class MainPage : ContentPage
     private void AddEntrySection()
     {
         RefreshItemPicker();
+        RefreshStorageSlotPicker(_entryStorageSlotPicker, "new-entry", _selectedEntryStorageSlotId, selectedId => _selectedEntryStorageSlotId = selectedId);
 
         var section = Section("Add Consumable Entry");
         section.Children.Add(_entryItemPicker);
         section.Children.Add(_quantityEntry);
         section.Children.Add(_unitEntry);
         section.Children.Add(_expiryDateEntry);
-        section.Children.Add(_storageSlotEntry);
+        section.Children.Add(_entryStorageSlotPicker);
         section.Children.Add(Button("Add Entry", AddConsumableEntryAsync));
         _dataContent.Children.Add(section);
     }
@@ -509,6 +586,7 @@ public sealed class MainPage : ContentPage
     private void AddDurableFormSection()
     {
         var section = Section("Create Durable Item");
+        RefreshStorageSlotPicker(_durableStorageSlotPicker, "durable-form", _selectedDurableStorageSlotId, selectedId => _selectedDurableStorageSlotId = selectedId);
         section.Children.Add(_durableNameEntry);
         section.Children.Add(GridRows(_durableTypeEntry, _durableStatusPicker));
         section.Children.Add(_durableLocationEntry);
@@ -518,7 +596,7 @@ public sealed class MainPage : ContentPage
         section.Children.Add(_durableWarrantyEntry);
         section.Children.Add(_durableDescriptionEntry);
         section.Children.Add(_durableNotesEntry);
-        section.Children.Add(_durableStorageSlotEntry);
+        section.Children.Add(_durableStorageSlotPicker);
         section.Children.Add(_durableSaveButton);
         section.Children.Add(_durableCancelButton);
         _dataContent.Children.Add(section);
@@ -601,7 +679,7 @@ public sealed class MainPage : ContentPage
             : DurableDetailCard(selected));
     }
 
-    private static View DurableDetailCard(DurableItem item)
+    private View DurableDetailCard(DurableItem item)
     {
         var layout = new VerticalStackLayout { Spacing = 4 };
         layout.Children.Add(new Label { Text = item.DisplayName, FontAttributes = FontAttributes.Bold });
@@ -694,7 +772,9 @@ public sealed class MainPage : ContentPage
         };
         var unit = new Entry { Text = entry.Unit, Placeholder = "Unit" };
         var expiry = new Entry { Text = entry.ExpiresOn ?? string.Empty, Placeholder = "Expiry date YYYY-MM-DD" };
-        var storageSlot = new Entry { Text = entry.StorageSlotId ?? string.Empty, Placeholder = "Storage slot ID" };
+        var selectedStorageSlotId = entry.StorageSlotId;
+        var storageSlotPicker = new VerticalStackLayout { Spacing = 6 };
+        RefreshStorageSlotPicker(storageSlotPicker, $"entry-{entry.EntryId}", selectedStorageSlotId, selectedId => selectedStorageSlotId = selectedId);
         var addStock = new Entry { Placeholder = "Add stock amount", Keyboard = Keyboard.Numeric };
         var addStockUnit = new Entry { Text = entry.Unit, Placeholder = "Add stock unit" };
         var consumeStock = new Entry { Placeholder = "Consume stock amount", Keyboard = Keyboard.Numeric };
@@ -705,7 +785,7 @@ public sealed class MainPage : ContentPage
         layout.Children.Add(new Label { Text = $"Lot {entry.EntryId}" });
         layout.Children.Add(new Label
         {
-            Text = $"Quantity: {entry.Quantity.ToString(CultureInfo.InvariantCulture)} {entry.Unit} | Expiry: {entry.ExpiresOn ?? "No expiry"} ({entry.ExpiryStatus}) | Location: {entry.StorageSlotId ?? "No location set"}"
+            Text = $"Quantity: {entry.Quantity.ToString(CultureInfo.InvariantCulture)} {entry.Unit} | Expiry: {entry.ExpiresOn ?? "No expiry"} ({entry.ExpiryStatus}) | Location: {DisplayLocation(entry.StorageSlotId)}"
         });
         layout.Children.Add(GridRows(addStock, addStockUnit));
         layout.Children.Add(GridRows(
@@ -714,9 +794,10 @@ public sealed class MainPage : ContentPage
         layout.Children.Add(GridRows(consumeStock, consumeStockUnit));
         layout.Children.Add(Button("Consume Stock", async () => await AdjustStockAsync(entry, consumeStock.Text, consumeStockUnit.Text, isAdd: false)));
         layout.Children.Add(GridRows(quantity, unit));
-        layout.Children.Add(GridRows(expiry, storageSlot));
+        layout.Children.Add(expiry);
+        layout.Children.Add(storageSlotPicker);
         layout.Children.Add(GridRows(
-            Button("Save Lot", async () => await SaveEntryAsync(entry, quantity.Text, unit.Text, expiry.Text, storageSlot.Text)),
+            Button("Save Lot", async () => await SaveEntryAsync(entry, quantity.Text, unit.Text, expiry.Text, selectedStorageSlotId)),
             Button("Undo Unsaved Changes", async () => await LoadDataAsync())));
 
         return Card(layout, ExpiryColor(entry.ExpiryStatus));
@@ -968,11 +1049,12 @@ public sealed class MainPage : ContentPage
             return;
         }
 
-        if (!TryParseOptionalDate(_expiryDateEntry.Text, "Expiry date", out var expiresOn) ||
-            !TryParseOptionalGuid(_storageSlotEntry.Text, "Storage slot ID", out var storageSlotId))
+        if (!TryParseOptionalDate(_expiryDateEntry.Text, "Expiry date", out var expiresOn))
         {
             return;
         }
+
+        var storageSlotId = ParseStoredGuid(_selectedEntryStorageSlotId);
 
         try
         {
@@ -986,12 +1068,87 @@ public sealed class MainPage : ContentPage
             _quantityEntry.Text = string.Empty;
             _unitEntry.Text = string.Empty;
             _expiryDateEntry.Text = string.Empty;
-            _storageSlotEntry.Text = string.Empty;
+            _selectedEntryStorageSlotId = null;
             await LoadDataAsync();
         }
         catch (Exception ex)
         {
             SetStatus($"Add consumable entry failed: {ex.Message}", isError: true);
+        }
+    }
+
+    private async Task SaveLocationAsync()
+    {
+        var name = (_locationNameEntry.Text ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            SetStatus("Location name is required.", isError: true);
+            return;
+        }
+
+        if (!TryParseSelectedLocationType(out var type))
+        {
+            return;
+        }
+
+        Guid? parentLocationId = null;
+        if (type != LocationType.House)
+        {
+            if (_locationParentPicker.SelectedItem is not ItemOption parentOption || !Guid.TryParse(parentOption.Id, out var parsedParentId))
+            {
+                SetStatus("Select a parent location.", isError: true);
+                return;
+            }
+
+            parentLocationId = parsedParentId;
+        }
+
+        int? sortOrder = null;
+        if (!string.IsNullOrWhiteSpace(_locationSortOrderEntry.Text))
+        {
+            sortOrder = ParseRequiredInt(_locationSortOrderEntry.Text, "Display order");
+            if (sortOrder is null)
+            {
+                return;
+            }
+        }
+
+        try
+        {
+            LocationReadModel? saved;
+            if (Guid.TryParse(_editingLocationId, out var locationId))
+            {
+                saved = _store.UpdateLocation(
+                    locationId,
+                    name,
+                    type,
+                    parentLocationId,
+                    BlankToNull(_locationDescriptionEntry.Text),
+                    sortOrder);
+
+                if (saved is null)
+                {
+                    SetStatus("Location was not found.", isError: true);
+                    return;
+                }
+            }
+            else
+            {
+                saved = _store.CreateLocation(
+                    name,
+                    type,
+                    parentLocationId,
+                    BlankToNull(_locationDescriptionEntry.Text),
+                    sortOrder);
+            }
+
+            ClearLocationForm();
+            SetStatus($"Saved location {saved.Name}.", isError: false);
+            await LoadDataAsync();
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Save location failed: {ex.Message}", isError: true);
         }
     }
 
@@ -1006,11 +1163,12 @@ public sealed class MainPage : ContentPage
 
         if (!TryParseSelectedDurableStatus(out var status) ||
             !TryParseOptionalDate(_durablePurchaseDateEntry.Text, "Purchase date", out var purchaseDate) ||
-            !TryParseOptionalDate(_durableWarrantyEntry.Text, "Warranty end", out var warrantyEndsOn) ||
-            !TryParseOptionalGuid(_durableStorageSlotEntry.Text, "Storage slot ID", out var storageSlotId))
+            !TryParseOptionalDate(_durableWarrantyEntry.Text, "Warranty end", out var warrantyEndsOn))
         {
             return;
         }
+
+        var storageSlotId = ParseStoredGuid(_selectedDurableStorageSlotId);
 
         var purchaseValue = ParseNullableDecimal(_durablePurchaseValueEntry.Text);
         if (purchaseValue is null && !string.IsNullOrWhiteSpace(_durablePurchaseValueEntry.Text))
@@ -1115,12 +1273,12 @@ public sealed class MainPage : ContentPage
             return;
         }
 
-        if (!TryParseOptionalDate(expiryText, "Expiry date", out var expiresOn) ||
-            !TryParseOptionalGuid(storageSlotText, "Storage slot ID", out var storageSlotId))
+        if (!TryParseOptionalDate(expiryText, "Expiry date", out var expiresOn))
         {
             return;
         }
 
+        var storageSlotId = ParseStoredGuid(storageSlotText);
         await PatchEntryAsync(entry.EntryId, quantity.Value, unit, expiresOn, storageSlotId);
     }
 
@@ -1318,9 +1476,22 @@ public sealed class MainPage : ContentPage
         _durableWarrantyEntry.Text = item.WarrantyEndsOn;
         _durableDescriptionEntry.Text = item.Description;
         _durableNotesEntry.Text = item.Notes;
-        _durableStorageSlotEntry.Text = item.StorageSlotId;
+        _selectedDurableStorageSlotId = item.StorageSlotId;
         _durableSaveButton.Text = "Save Durable Item";
         _durableCancelButton.IsVisible = true;
+    }
+
+    private void StartLocationEdit(LocationItem location)
+    {
+        _editingLocationId = location.Id;
+        _locationNameEntry.Text = location.Name;
+        _locationTypePicker.SelectedItem = location.Type;
+        _locationDescriptionEntry.Text = location.Description;
+        _locationSortOrderEntry.Text = location.SortOrder?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
+        _locationSaveButton.Text = "Save Location";
+        _locationCancelButton.IsVisible = true;
+        RefreshLocationParentPicker(location.ParentLocationId);
+        RebuildDataSections();
     }
 
     private void ClearDurableForm()
@@ -1338,9 +1509,21 @@ public sealed class MainPage : ContentPage
         _durableWarrantyEntry.Text = string.Empty;
         _durableDescriptionEntry.Text = string.Empty;
         _durableNotesEntry.Text = string.Empty;
-        _durableStorageSlotEntry.Text = string.Empty;
+        _selectedDurableStorageSlotId = null;
         _durableSaveButton.Text = "Create Durable Item";
         _durableCancelButton.IsVisible = false;
+    }
+
+    private void ClearLocationForm()
+    {
+        _editingLocationId = null;
+        _locationNameEntry.Text = string.Empty;
+        _locationTypePicker.SelectedItem = LocationType.House.ToString();
+        _locationDescriptionEntry.Text = string.Empty;
+        _locationSortOrderEntry.Text = string.Empty;
+        _locationSaveButton.Text = "Create Location";
+        _locationCancelButton.IsVisible = false;
+        RefreshLocationParentPicker();
     }
 
     private void DetachReusableControls()
@@ -1354,7 +1537,7 @@ public sealed class MainPage : ContentPage
             _quantityEntry,
             _unitEntry,
             _expiryDateEntry,
-            _storageSlotEntry,
+            _entryStorageSlotPicker,
             _durableNameEntry,
             _durableTypeEntry,
             _durableStatusPicker,
@@ -1367,10 +1550,17 @@ public sealed class MainPage : ContentPage
             _durableWarrantyEntry,
             _durableDescriptionEntry,
             _durableNotesEntry,
-            _durableStorageSlotEntry,
+            _durableStorageSlotPicker,
             _durableSaveButton,
             _durableCancelButton,
-            _durableDetailContent
+            _durableDetailContent,
+            _locationNameEntry,
+            _locationTypePicker,
+            _locationParentPicker,
+            _locationDescriptionEntry,
+            _locationSortOrderEntry,
+            _locationSaveButton,
+            _locationCancelButton
         ];
 
         foreach (var control in controls)
@@ -1395,6 +1585,19 @@ public sealed class MainPage : ContentPage
         return false;
     }
 
+    private bool TryParseSelectedLocationType(out LocationType type)
+    {
+        var value = _locationTypePicker.SelectedItem as string ?? LocationType.House.ToString();
+        if (Enum.TryParse(value, ignoreCase: true, out type) &&
+            Enum.IsDefined(typeof(LocationType), type))
+        {
+            return true;
+        }
+
+        SetStatus("Location type is invalid.", isError: true);
+        return false;
+    }
+
     private void RefreshItemPicker()
     {
         var selectedId = (_entryItemPicker.SelectedItem as ItemOption)?.Id;
@@ -1416,6 +1619,156 @@ public sealed class MainPage : ContentPage
         }
 
         _entryItemPicker.SelectedItem = options.FirstOrDefault(option => option.Id == itemId);
+    }
+
+    private void RefreshLocationParentPicker(string? selectedParentId = null)
+    {
+        selectedParentId ??= (_locationParentPicker.SelectedItem as ItemOption)?.Id;
+
+        if (!TryParseSelectedLocationType(out var selectedType))
+        {
+            _locationParentPicker.ItemsSource = new List<ItemOption>();
+            _locationParentPicker.IsEnabled = false;
+            return;
+        }
+
+        if (selectedType == LocationType.House)
+        {
+            _locationParentPicker.ItemsSource = new List<ItemOption>();
+            _locationParentPicker.SelectedItem = null;
+            _locationParentPicker.IsEnabled = false;
+            return;
+        }
+
+        var parentType = selectedType switch
+        {
+            LocationType.Room => LocationType.House,
+            LocationType.StorageUnit => LocationType.Room,
+            LocationType.StorageSlot => LocationType.StorageUnit,
+            _ => LocationType.House
+        };
+
+        var options = _locations
+            .Where(location => string.Equals(location.Type, parentType.ToString(), StringComparison.OrdinalIgnoreCase)
+                && !IsLocationOrDescendant(location.Id, _editingLocationId))
+            .OrderBy(location => location.SortOrder ?? int.MaxValue)
+            .ThenBy(location => location.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(location => new ItemOption(location.Id, location.Name))
+            .ToList();
+
+        _locationParentPicker.ItemsSource = options;
+        _locationParentPicker.IsEnabled = true;
+        _locationParentPicker.SelectedItem = options.FirstOrDefault(option => option.Id == selectedParentId);
+    }
+
+    private bool IsLocationOrDescendant(string locationId, string? ancestorId)
+    {
+        if (string.IsNullOrWhiteSpace(ancestorId))
+        {
+            return false;
+        }
+
+        if (locationId == ancestorId)
+        {
+            return true;
+        }
+
+        var location = _locations.FirstOrDefault(candidate => candidate.Id == locationId);
+        return location?.ParentLocationId is not null && IsLocationOrDescendant(location.ParentLocationId, ancestorId);
+    }
+
+    private void RefreshStorageSlotPicker(
+        VerticalStackLayout target,
+        string pickerKey,
+        string? selectedStorageSlotId,
+        Action<string?> onSelected)
+    {
+        target.Children.Clear();
+        target.Children.Add(new Label { Text = "Storage slot", FontAttributes = FontAttributes.Bold });
+        target.Children.Add(new Label { Text = $"Selected: {(string.IsNullOrWhiteSpace(selectedStorageSlotId) ? "No storage slot selected" : DisplayLocation(selectedStorageSlotId))}" });
+        target.Children.Add(Button("No storage slot selected", () =>
+        {
+            onSelected(null);
+            RefreshStorageSlotPicker(target, pickerKey, null, onSelected);
+            return Task.CompletedTask;
+        }));
+
+        if (_locationTree.Count == 0)
+        {
+            target.Children.Add(new Label { Text = "No managed storage slots yet." });
+            return;
+        }
+
+        foreach (var node in _locationTree)
+        {
+            AddStorageSlotTreeNode(target, pickerKey, node, depth: 0, selectedStorageSlotId, onSelected);
+        }
+    }
+
+    private void AddStorageSlotTreeNode(
+        Layout parent,
+        string pickerKey,
+        LocationTreeNodeItem node,
+        int depth,
+        string? selectedStorageSlotId,
+        Action<string?> onSelected)
+    {
+        var isStorageSlot = string.Equals(node.Location.Type, LocationType.StorageSlot.ToString(), StringComparison.OrdinalIgnoreCase);
+        var indent = new Thickness(depth * 16, 0, 0, 4);
+
+        if (isStorageSlot)
+        {
+            var isSelected = node.Location.Id == selectedStorageSlotId;
+            var selectButton = Button($"{(isSelected ? "Selected: " : string.Empty)}{node.Location.Name}", () =>
+            {
+                onSelected(node.Location.Id);
+                RefreshStorageSlotPicker((VerticalStackLayout)parent, pickerKey, node.Location.Id, onSelected);
+                return Task.CompletedTask;
+            });
+            selectButton.Margin = indent;
+            parent.Children.Add(selectButton);
+            return;
+        }
+
+        var isExpanded = StorageSlotPickerExpandedIds(pickerKey).Contains(node.Location.Id);
+        var toggleButton = Button($"{(isExpanded ? "[-]" : "[+]")} {node.Location.Name} ({node.Location.Type})", () =>
+        {
+            ToggleStorageSlotPickerNode(pickerKey, node.Location.Id);
+            RefreshStorageSlotPicker((VerticalStackLayout)parent, pickerKey, selectedStorageSlotId, onSelected);
+            return Task.CompletedTask;
+        });
+        toggleButton.Margin = indent;
+        parent.Children.Add(toggleButton);
+
+        if (!isExpanded)
+        {
+            return;
+        }
+
+        foreach (var child in node.Children)
+        {
+            AddStorageSlotTreeNode(parent, pickerKey, child, depth + 1, selectedStorageSlotId, onSelected);
+        }
+    }
+
+    private HashSet<string> StorageSlotPickerExpandedIds(string pickerKey)
+    {
+        if (!_expandedStorageSlotPickerNodeIds.TryGetValue(pickerKey, out var expandedIds))
+        {
+            expandedIds = [];
+            _expandedStorageSlotPickerNodeIds[pickerKey] = expandedIds;
+        }
+
+        return expandedIds;
+    }
+
+    private void ToggleStorageSlotPickerNode(string pickerKey, string locationId)
+    {
+        var expandedIds = StorageSlotPickerExpandedIds(pickerKey);
+        if (!expandedIds.Add(locationId))
+        {
+            expandedIds.Remove(locationId);
+        }
     }
 
     private decimal? ParseRequiredDecimal(string? value, string fieldName)
@@ -1477,8 +1830,9 @@ public sealed class MainPage : ContentPage
         return [
             "All",
             .. _consumableEntries
-                .Select(entry => entry.StorageSlotId)
-                .Concat(_durableItems.Select(item => item.CurrentLocation ?? item.StorageSlotId))
+                .Select(entry => DisplayLocation(entry.StorageSlotId))
+                .Concat(_durableItems.Select(DurableLocation))
+                .Concat(_locations.Select(location => location.Name))
                 .Where(location => !string.IsNullOrWhiteSpace(location))
                 .Select(location => location!)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -1702,13 +2056,59 @@ public sealed class MainPage : ContentPage
         return string.IsNullOrWhiteSpace(item.ItemType) ? "Uncategorized" : item.ItemType;
     }
 
-    private static string DurableLocation(DurableItem item)
+    private string DurableLocation(DurableItem item)
     {
         return !string.IsNullOrWhiteSpace(item.CurrentLocation)
-            ? item.CurrentLocation
+            ? DisplayLocation(item.CurrentLocation)
             : !string.IsNullOrWhiteSpace(item.StorageSlotId)
-                ? item.StorageSlotId
+                ? DisplayLocation(item.StorageSlotId)
                 : "No location set";
+    }
+
+    private string DisplayLocation(string? location)
+    {
+        if (string.IsNullOrWhiteSpace(location))
+        {
+            return "No location set";
+        }
+
+        return TryFormatLocationPath(location, out var path) ? path : location;
+    }
+
+    private bool TryFormatLocationPath(string locationId, out string path)
+    {
+        foreach (var node in _locationTree)
+        {
+            if (TryBuildLocationPath(node, locationId, [], out var names))
+            {
+                path = string.Join(" › ", names);
+                return true;
+            }
+        }
+
+        path = string.Empty;
+        return false;
+    }
+
+    private static bool TryBuildLocationPath(LocationTreeNodeItem node, string locationId, List<string> parentNames, out List<string> names)
+    {
+        var nextNames = parentNames.Append(node.Location.Name).ToList();
+        if (node.Location.Id == locationId)
+        {
+            names = nextNames;
+            return true;
+        }
+
+        foreach (var child in node.Children)
+        {
+            if (TryBuildLocationPath(child, locationId, nextNames, out names))
+            {
+                return true;
+            }
+        }
+
+        names = [];
+        return false;
     }
 
     private static string WarrantyIndicator(DurableItem item)
@@ -1800,6 +2200,25 @@ public sealed class MainPage : ContentPage
             item.StorageSlotId?.ToString());
     }
 
+    private static LocationItem ToMobileLocation(LocationReadModel location)
+    {
+        return new LocationItem(
+            location.Id.ToString(),
+            location.Name,
+            location.Type,
+            location.ParentLocationId?.ToString(),
+            location.Description,
+            location.SortOrder,
+            location.IsArchived);
+    }
+
+    private static LocationTreeNodeItem ToMobileLocationTreeNode(LocationTreeNodeReadModel node)
+    {
+        return new LocationTreeNodeItem(
+            ToMobileLocation(node.Location),
+            node.Children.Select(ToMobileLocationTreeNode).ToList());
+    }
+
     private static View LabeledField(string labelText, View field, string description, string? help = null)
     {
         var label = new Label { Text = labelText };
@@ -1846,6 +2265,8 @@ public sealed class MainPage : ContentPage
     private sealed record ReplenishmentSuggestion(string ItemDefinitionId, string ItemName, decimal CurrentQuantity, decimal UsableCurrentQuantity, decimal DesiredQuantity, decimal DeficitAmount, decimal ExpiringSoonAmount, decimal SuggestedPurchaseAmount, decimal RequiredAmount, string Unit, List<ConsumableEntry> Entries);
     private sealed record ReplenishmentRule(string Id, string ItemDefinitionId, string ItemName, decimal DesiredAmount, string DesiredUnit, int ExpiryWarningDays, bool IsDisabled);
     private sealed record ShoppingListItem(string Id, string ItemDefinitionId, string ItemName, decimal Quantity, string Unit, bool IsResolved, bool IsPurchased, string Status, bool StockUpdateNeeded, string? NextInventoryAction, decimal? SourceDeficitAmount, decimal? SourceExpiringSoonAmount, decimal? SourceSuggestedPurchaseAmount);
+    private sealed record LocationItem(string Id, string Name, string Type, string? ParentLocationId, string? Description, int? SortOrder, bool IsArchived);
+    private sealed record LocationTreeNodeItem(LocationItem Location, List<LocationTreeNodeItem> Children);
     private sealed record PantrySnapshot(
         List<InventorySummaryItem> Summary,
         List<DurableItem> DurableItems,
@@ -1853,7 +2274,9 @@ public sealed class MainPage : ContentPage
         List<ConsumableEntry> ExpiringEntries,
         List<ReplenishmentSuggestion> Suggestions,
         List<ShoppingListItem> ShoppingListItems,
-        List<ReplenishmentRule> Rules);
+        List<ReplenishmentRule> Rules,
+        List<LocationItem> Locations,
+        List<LocationTreeNodeItem> LocationTree);
 
     private enum PageId
     {

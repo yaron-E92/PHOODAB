@@ -18,6 +18,10 @@ import {
   deleteShoppingListItem,
   getDurableItem,
   getDurableItems,
+  getLocationDetail,
+  getLocationTree,
+  createLocation,
+  updateLocation,
   retireDurableItem,
   updateConsumableEntry,
   updateDurableItem,
@@ -31,7 +35,11 @@ import {
   type ReplenishmentRule,
   type ItemDefinition,
   type ShoppingListItem,
-  type GlobalSearchResult
+  type GlobalSearchResult,
+  type Location,
+  type LocationDetail,
+  type LocationTreeNode,
+  type LocationType
 } from '../../../packages/api-client/src/client';
 
 const baseUrl = 'http://localhost:5199';
@@ -41,7 +49,9 @@ type EntryActionEdit = { addStock: string; addStockUnit: string; consumeStock: s
 type ItemRoute =
   | { kind: 'inventory' }
   | { kind: 'consumable'; itemDefinitionId: string }
-  | { kind: 'durable'; entryId: string };
+  | { kind: 'durable'; entryId: string }
+  | { kind: 'locations' }
+  | { kind: 'location'; locationId: string };
 type DurableItemForm = {
   displayName: string;
   description: string;
@@ -61,12 +71,170 @@ type DurableItemForm = {
 const durableStatuses: DurableItemStatus[] = ['Active', 'NeedsRepair', 'LoanedOut', 'Stored', 'Retired', 'Lost'];
 
 const getItemRoute = (pathname: string): ItemRoute => {
+  if (/^\/locations\/?$/.test(pathname)) return { kind: 'locations' };
+  const locationMatch = pathname.match(/^\/locations\/([^/]+)\/?$/);
+  if (locationMatch) return { kind: 'location', locationId: decodeURIComponent(locationMatch[1]) };
+
   const match = pathname.match(/^\/items\/(consumable|durable)\/([^/]+)\/?$/);
   if (!match) return { kind: 'inventory' };
 
   return match[1] === 'consumable'
     ? { kind: 'consumable', itemDefinitionId: decodeURIComponent(match[2]) }
     : { kind: 'durable', entryId: decodeURIComponent(match[2]) };
+};
+
+const flattenLocationTree = (nodes: LocationTreeNode[]): Location[] =>
+  nodes.flatMap((node) => [node.location, ...flattenLocationTree(node.children)]);
+
+const findLocationAncestorIds = (nodes: LocationTreeNode[], targetId: string, ancestors: string[] = []): string[] | null => {
+  for (const node of nodes) {
+    if (node.location.id === targetId) return ancestors;
+    const childMatch = findLocationAncestorIds(node.children, targetId, [...ancestors, node.location.id]);
+    if (childMatch) return childMatch;
+  }
+
+  return null;
+};
+
+const findLocationPath = (nodes: LocationTreeNode[], targetId: string, path: Location[] = []): Location[] | null => {
+  for (const node of nodes) {
+    const nextPath = [...path, node.location];
+    if (node.location.id === targetId) return nextPath;
+    const childMatch = findLocationPath(node.children, targetId, nextPath);
+    if (childMatch) return childMatch;
+  }
+
+  return null;
+};
+
+const formatLocationPath = (nodes: LocationTreeNode[], id: string | null | undefined) => {
+  if (!id) return 'No location set';
+  return findLocationPath(nodes, id)?.map((location) => location.name).join(' › ') ?? id;
+};
+
+const formatLocationPathFromKnownLocations = (nodes: LocationTreeNode[], locations: Location[], id: string | null | undefined) => {
+  if (!id) return 'No location set';
+
+  const treePath = findLocationPath(nodes, id);
+  if (treePath) return treePath.map((location) => location.name).join(' › ');
+
+  const byId = new Map([...flattenLocationTree(nodes), ...locations].map((location) => [location.id, location]));
+  const names: string[] = [];
+  const seen = new Set<string>();
+  let current = byId.get(id);
+
+  while (current && !seen.has(current.id)) {
+    seen.add(current.id);
+    names.unshift(current.name);
+    current = current.parentLocationId ? byId.get(current.parentLocationId) : undefined;
+  }
+
+  return names.length > 0 ? names.join(' › ') : id;
+};
+
+const LocationName = ({ nodes, locations, id }: { nodes: LocationTreeNode[]; locations: Location[]; id: string | null | undefined }) => {
+  return <>{formatLocationPathFromKnownLocations(nodes, locations, id)}</>;
+};
+
+const LocationTreeList = ({
+  nodes,
+  onOpen,
+  onEdit
+}: {
+  nodes: LocationTreeNode[];
+  onOpen: (locationId: string) => void;
+  onEdit: (location: Location) => void;
+}) => (
+  <ul>
+    {nodes.map((node) => (
+      <li key={node.location.id}>
+        <button onClick={() => onOpen(node.location.id)} aria-label={`Open location ${node.location.name}`}>
+          {node.location.name} ({node.location.type})
+        </button>
+        <button type="button" onClick={() => onEdit(node.location)} aria-label={`Edit location ${node.location.name}`}>
+          Edit
+        </button>
+        {node.children.length > 0 && <LocationTreeList nodes={node.children} onOpen={onOpen} onEdit={onEdit} />}
+      </li>
+    ))}
+  </ul>
+);
+
+const StorageSlotTreePicker = ({
+  label,
+  nodes,
+  selectedId,
+  onSelect
+}: {
+  label: string;
+  nodes: LocationTreeNode[];
+  selectedId: string;
+  onSelect: (storageSlotId: string) => void;
+}) => {
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set(selectedId ? findLocationAncestorIds(nodes, selectedId) ?? [] : []));
+
+  useEffect(() => {
+    if (!selectedId) return;
+    const ancestorIds = findLocationAncestorIds(nodes, selectedId);
+    if (!ancestorIds) return;
+    setExpandedIds((current) => new Set([...current, ...ancestorIds]));
+  }, [nodes, selectedId]);
+
+  const toggle = (locationId: string) => {
+    setExpandedIds((current) => {
+      const next = new Set(current);
+      if (next.has(locationId)) {
+        next.delete(locationId);
+      } else {
+        next.add(locationId);
+      }
+      return next;
+    });
+  };
+
+  const renderNodes = (treeNodes: LocationTreeNode[], depth = 0): React.ReactNode => (
+    <ul style={{ listStyle: 'none', margin: 0, paddingLeft: depth === 0 ? 0 : 16 }}>
+      {treeNodes.map((node) => {
+        const isExpanded = expandedIds.has(node.location.id);
+        const isStorageSlot = node.location.type === 'StorageSlot';
+        return (
+          <li key={node.location.id} style={{ marginTop: 4 }}>
+            {isStorageSlot ? (
+              <button
+                type="button"
+                aria-label={`Select storage slot ${node.location.name}`}
+                aria-pressed={selectedId === node.location.id}
+                onClick={() => onSelect(node.location.id)}
+              >
+                {selectedId === node.location.id ? 'Selected: ' : ''}{node.location.name}
+              </button>
+            ) : (
+              <button
+                type="button"
+                aria-label={`Toggle location ${node.location.name}`}
+                aria-expanded={isExpanded}
+                onClick={() => toggle(node.location.id)}
+              >
+                {isExpanded ? '[-]' : '[+]'} {node.location.name} ({node.location.type})
+              </button>
+            )}
+            {!isStorageSlot && isExpanded && renderNodes(node.children, depth + 1)}
+          </li>
+        );
+      })}
+    </ul>
+  );
+
+  const selectedLocationText = formatLocationPath(nodes, selectedId);
+
+  return (
+    <fieldset style={{ border: '1px solid #ddd', padding: 8 }}>
+      <legend>{label}</legend>
+      <div>Selected: {selectedId ? selectedLocationText : 'No storage slot selected'}</div>
+      <button type="button" onClick={() => onSelect('')}>No storage slot selected</button>
+      {nodes.length === 0 ? <p>No storage slots yet.</p> : renderNodes(nodes)}
+    </fieldset>
+  );
 };
 
 const emptyDurableItemForm: DurableItemForm = {
@@ -193,6 +361,15 @@ export function App() {
   const [editingDurableItemId, setEditingDurableItemId] = useState<string | null>(null);
   const [selectedDurableItem, setSelectedDurableItem] = useState<DurableItem | null>(null);
   const [durableDetailLoading, setDurableDetailLoading] = useState(false);
+  const [locationTree, setLocationTree] = useState<LocationTreeNode[]>([]);
+  const [selectedLocation, setSelectedLocation] = useState<LocationDetail | null>(null);
+  const [locationDetailLoading, setLocationDetailLoading] = useState(false);
+  const [locationName, setLocationName] = useState('');
+  const [locationType, setLocationType] = useState<LocationType>('House');
+  const [locationParentId, setLocationParentId] = useState('');
+  const [locationDescription, setLocationDescription] = useState('');
+  const [locationSortOrder, setLocationSortOrder] = useState('');
+  const [editingLocationId, setEditingLocationId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<GlobalSearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -213,14 +390,15 @@ export function App() {
     setError(null);
 
     try {
-      const [summaryData, entriesData, expiringData, suggestionData, shoppingData, rulesData, durableData] = await Promise.all([
+      const [summaryData, entriesData, expiringData, suggestionData, shoppingData, rulesData, durableData, locationTreeData] = await Promise.all([
         getInventorySummary(baseUrl),
         getConsumableEntries(baseUrl),
         getExpiringConsumableEntries(baseUrl),
         getReplenishmentSuggestions(baseUrl),
         getShoppingListItems(baseUrl),
         getReplenishmentRules(baseUrl),
-        getDurableItems(baseUrl)
+        getDurableItems(baseUrl),
+        getLocationTree(baseUrl)
       ]);
       setSummary(summaryData);
       setConsumableEntries(entriesData);
@@ -232,6 +410,7 @@ export function App() {
       setShoppingListItems(shoppingData);
       setRules(rulesData);
       setDurableItems(durableData);
+      setLocationTree(locationTreeData);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -326,6 +505,58 @@ export function App() {
     setRoute(getItemRoute(path));
   };
 
+  const clearLocationForm = () => {
+    setEditingLocationId(null);
+    setLocationName('');
+    setLocationType('House');
+    setLocationParentId('');
+    setLocationDescription('');
+    setLocationSortOrder('');
+  };
+
+  const onEditLocation = (location: Location) => {
+    setEditingLocationId(location.id);
+    setLocationName(location.name);
+    setLocationType(location.type);
+    setLocationParentId(location.parentLocationId ?? '');
+    setLocationDescription(location.description ?? '');
+    setLocationSortOrder(location.sortOrder == null ? '' : String(location.sortOrder));
+    if (route.kind === 'location') {
+      navigate('/locations');
+    }
+  };
+
+  const onSaveLocation = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!locationName.trim()) return;
+
+    try {
+      const payload = {
+        name: locationName.trim(),
+        type: locationType,
+        parentLocationId: locationType === 'House' ? null : locationParentId || null,
+        description: toNullableString(locationDescription),
+        sortOrder: locationSortOrder ? Number(locationSortOrder) : null
+      };
+      const saved = editingLocationId
+        ? await updateLocation(baseUrl, editingLocationId, payload)
+        : await createLocation(baseUrl, payload);
+
+      if (selectedLocation?.location.id === saved.id) {
+        setSelectedLocation({
+          ...selectedLocation,
+          location: saved
+        });
+      }
+
+      clearLocationForm();
+      setError(null);
+      await loadData();
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
   const onSearch = async (event: React.FormEvent) => {
     event.preventDefault();
     const query = searchQuery.trim();
@@ -356,9 +587,7 @@ export function App() {
       return;
     }
     if (result.kind === 'location') {
-      setLocationFilter(result.title);
-      setItemTypeFilter('All');
-      navigate('/#smart-filters');
+      navigate(`/locations/${encodeURIComponent(result.id)}`);
       return;
     }
 
@@ -437,6 +666,29 @@ export function App() {
       })
       .finally(() => {
         if (isCurrent) setDurableDetailLoading(false);
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [route]);
+
+  useEffect(() => {
+    if (route.kind !== 'location') return;
+
+    let isCurrent = true;
+    setLocationDetailLoading(true);
+    setSelectedLocation(null);
+    setError(null);
+    getLocationDetail(baseUrl, route.locationId)
+      .then((detail) => {
+        if (isCurrent) setSelectedLocation(detail);
+      })
+      .catch((e) => {
+        if (isCurrent) setError(String(e));
+      })
+      .finally(() => {
+        if (isCurrent) setLocationDetailLoading(false);
       });
 
     return () => {
@@ -618,10 +870,11 @@ export function App() {
     clearEntryError(entry.entryId);
   };
 
+  const allLocations = flattenLocationTree(locationTree);
   const availableLocations = [...new Set([
     ...consumableEntries.map((entry) => entry.storageSlotId),
     ...durableItems.map((item) => item.currentLocation || item.storageSlotId)
-  ].filter((location): location is string => Boolean(location)))].sort((a, b) => a.localeCompare(b));
+  ].filter((location): location is string => Boolean(location)))].sort((a, b) => formatLocationPath(locationTree, a).localeCompare(formatLocationPath(locationTree, b)));
   const matchesLocation = (location: string | null | undefined) => locationFilter === 'All' || location === locationFilter;
   const visibleDurableItems = durableItems.filter((item) =>
     itemTypeFilter !== 'Consumable'
@@ -687,7 +940,7 @@ export function App() {
         Location
         <select aria-label="Location filter" value={locationFilter} onChange={(event) => setLocationFilter(event.target.value)}>
           <option value="All">All</option>
-          {availableLocations.map((location) => <option key={location} value={location}>{location}</option>)}
+          {availableLocations.map((location) => <option key={location} value={location}>{formatLocationPath(locationTree, location)}</option>)}
         </select>
       </label>
       <label>
@@ -718,6 +971,12 @@ export function App() {
   );
 
   const selectedDurableDetail = selectedDurableItem;
+  const expectedParentType: Partial<Record<LocationType, LocationType>> = {
+    Room: 'House',
+    StorageUnit: 'Room',
+    StorageSlot: 'StorageUnit'
+  };
+  const possibleLocationParents = allLocations.filter((location) => location.type === expectedParentType[locationType] && location.id !== editingLocationId);
   const renderDurableEditor = () => (
     <form onSubmit={onSaveDurableItem} aria-label="Edit durable item">
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'end', marginTop: 12 }}>
@@ -785,10 +1044,15 @@ export function App() {
           onChange={(e) => setDurableFormField('warrantyEndsOn', e.target.value)}
         />
         <input
-          aria-label="Durable item storage slot"
-          placeholder="Storage slot ID (optional)"
+          type="hidden"
           value={durableForm.storageSlotId}
-          onChange={(e) => setDurableFormField('storageSlotId', e.target.value)}
+          readOnly
+        />
+        <StorageSlotTreePicker
+          label="Durable item storage slot"
+          nodes={locationTree}
+          selectedId={durableForm.storageSlotId}
+          onSelect={(id) => setDurableFormField('storageSlotId', id)}
         />
         <input
           aria-label="Durable item description"
@@ -807,6 +1071,119 @@ export function App() {
       </div>
     </form>
   );
+
+  if (route.kind === 'locations') {
+    return (
+      <main style={{ fontFamily: 'system-ui', padding: 16 }}>
+        <button onClick={() => navigate('/')} aria-label="Back to inventory">Back to Inventory</button>
+        {renderGlobalSearch()}
+        <h1>Locations</h1>
+        <p>Browse inventory from House to Room to Storage Unit to Storage Slot.</p>
+        {error && <p role="alert">Error: {error}</p>}
+        <section aria-label="Location hierarchy">
+          <h2>Location Hierarchy</h2>
+          {!isLoading && locationTree.length === 0 && <p>No locations yet.</p>}
+          {locationTree.length > 0 && (
+            <LocationTreeList
+              nodes={locationTree}
+              onOpen={(id) => navigate(`/locations/${encodeURIComponent(id)}`)}
+              onEdit={onEditLocation}
+            />
+          )}
+        </section>
+        <section aria-label={editingLocationId ? "Edit location" : "Create location"}>
+          <h2>{editingLocationId ? 'Edit Location' : 'Create Location'}</h2>
+          <form onSubmit={onSaveLocation} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'end' }}>
+            <label>
+              Name
+              <input aria-label="Location name" value={locationName} onChange={(event) => setLocationName(event.target.value)} />
+            </label>
+            <label>
+              Type
+              <select
+                aria-label="Location type"
+                value={locationType}
+                onChange={(event) => {
+                  setLocationType(event.target.value as LocationType);
+                  setLocationParentId('');
+                }}
+              >
+                {(['House', 'Room', 'StorageUnit', 'StorageSlot'] as LocationType[]).map((type) => <option key={type} value={type}>{type}</option>)}
+              </select>
+            </label>
+            <label>
+              Parent
+              <select aria-label="Location parent" value={locationParentId} disabled={locationType === 'House'} onChange={(event) => setLocationParentId(event.target.value)}>
+                <option value="">Select parent</option>
+                {possibleLocationParents.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}
+              </select>
+            </label>
+            <label>
+              Description
+              <input aria-label="Location description" value={locationDescription} onChange={(event) => setLocationDescription(event.target.value)} />
+            </label>
+            <label>
+              Display order
+              <input aria-label="Location display order" type="number" min={0} value={locationSortOrder} onChange={(event) => setLocationSortOrder(event.target.value)} />
+            </label>
+            <button type="submit">{editingLocationId ? 'Save Location' : 'Create Location'}</button>
+            {editingLocationId && <button type="button" onClick={clearLocationForm}>Cancel Location Edit</button>}
+          </form>
+        </section>
+      </main>
+    );
+  }
+
+  if (route.kind === 'location') {
+    const detail = selectedLocation;
+    const detailLocations = detail ? [detail.location, ...detail.children, ...allLocations] : allLocations;
+    return (
+      <main style={{ fontFamily: 'system-ui', padding: 16 }}>
+        <button onClick={() => navigate('/locations')} aria-label="Back to locations">Back to Locations</button>
+        {renderGlobalSearch()}
+        {locationDetailLoading && <p>Loading location detail...</p>}
+        {error && <p role="alert">Error: {error}</p>}
+        {!locationDetailLoading && detail && (
+          <section aria-label={`Location detail for ${detail.location.name}`}>
+            <h1>{detail.location.name}</h1>
+            <p>{detail.location.type} | ID: {detail.location.id}</p>
+            {detail.location.description && <p>{detail.location.description}</p>}
+            <p>{detail.childLocationCount} child locations, {detail.consumableCount} consumable lots, {detail.durableItemCount} durable items</p>
+            <button type="button" onClick={() => onEditLocation(detail.location)} aria-label={`Edit location ${detail.location.name}`}>Edit Location</button>
+            <h2>Child Locations</h2>
+            {detail.children.length === 0 && <p>No child locations.</p>}
+            <ul>
+              {detail.children.map((child) => (
+                <li key={child.id}>
+                  <button onClick={() => navigate(`/locations/${encodeURIComponent(child.id)}`)}>{child.name} ({child.type})</button>
+                </li>
+              ))}
+            </ul>
+            <h2>Consumables Stored Here</h2>
+            {detail.consumables.length === 0 && <p>No consumables stored here.</p>}
+            <ul>
+              {detail.consumables.map((entry) => (
+                <li key={entry.entryId}>
+                  {entry.itemName}: {entry.quantity} {entry.unit}
+                  <div>Location: <LocationName nodes={locationTree} locations={detailLocations} id={entry.storageSlotId} /></div>
+                </li>
+              ))}
+            </ul>
+            <h2>Durable Items Stored Here</h2>
+            {detail.durableItems.length === 0 && <p>No durable items stored here.</p>}
+            <ul>
+              {detail.durableItems.map((item) => (
+                <li key={item.id}>
+                  {getDurableDisplayName(item)} ({item.status})
+                  <div>Location: {item.currentLocation || <LocationName nodes={locationTree} locations={detailLocations} id={item.storageSlotId} />}</div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+      </main>
+    );
+  }
 
   if (route.kind === 'consumable') {
     const item = summary.find((candidate) => candidate.itemDefinitionId === route.itemDefinitionId);
@@ -838,7 +1215,7 @@ export function App() {
               {item?.mixedUnitWarning && <p style={{ color: '#9a3412' }}>{item.mixedUnitWarning}</p>}
 
               <h2>Locations</h2>
-              <p>{locations.length > 0 ? locations.join(', ') : 'No location set'}</p>
+              <p>{locations.length > 0 ? locations.map((location) => formatLocationPath(locationTree, location)).join(', ') : 'No location set'}</p>
 
               <h2>Lots / Batches</h2>
               {lots.length === 0 && <p>No lots recorded.</p>}
@@ -850,7 +1227,7 @@ export function App() {
                     <strong>Lot {entry.entryId}</strong>
                     <div>Quantity: {entry.quantity} {entry.unit}</div>
                     <div>Expiry: {entry.expiresOn ?? 'No expiry'} ({entry.expiryStatus})</div>
-                    <div>Location: {entry.storageSlotId || 'No location set'}</div>
+                    <div>Location: <LocationName nodes={locationTree} locations={allLocations} id={entry.storageSlotId} /></div>
                     {entryErrors[entry.entryId] && <p role="alert">{entryErrors[entry.entryId]}</p>}
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
                       <label>
@@ -886,7 +1263,12 @@ export function App() {
                       />
                       <input aria-label={`Entry unit for ${entry.itemName}`} value={edit.unit} onChange={(e) => setEntryEdit(entry.entryId, { unit: e.target.value })} />
                       <input aria-label={`Entry expiry for ${entry.itemName}`} type="date" value={edit.expiresOn} onChange={(e) => setEntryEdit(entry.entryId, { expiresOn: e.target.value })} />
-                      <input aria-label={`Entry storage slot for ${entry.itemName}`} value={edit.storageSlotId} onChange={(e) => setEntryEdit(entry.entryId, { storageSlotId: e.target.value })} />
+                      <StorageSlotTreePicker
+                        label={`Entry storage slot for ${entry.itemName}`}
+                        nodes={locationTree}
+                        selectedId={edit.storageSlotId}
+                        onSelect={(id) => setEntryEdit(entry.entryId, { storageSlotId: id })}
+                      />
                       <button onClick={() => onSaveConsumableEntry(entry)}>Adjust Quantity / Expiry / Location</button>
                       <button onClick={() => onResetEntryEdit(entry)}>Undo Unsaved Changes</button>
                     </div>
@@ -963,7 +1345,7 @@ export function App() {
               <div>Serial number: {selectedDurableDetail.serialNumber || 'Not recorded'}</div>
               <h2>Status and Location</h2>
               <div>Status: {selectedDurableDetail.status}</div>
-              <div>Location: {selectedDurableDetail.currentLocation || selectedDurableDetail.storageSlotId || 'No location set'}</div>
+              <div>Location: {selectedDurableDetail.currentLocation || <LocationName nodes={locationTree} locations={allLocations} id={selectedDurableDetail.storageSlotId} />}</div>
               <h2>Purchase and Warranty</h2>
               <div>Purchase date: {selectedDurableDetail.purchaseDate || 'Not recorded'}</div>
               <div>Purchase value: {selectedDurableDetail.purchaseValue ?? 'Not recorded'}</div>
@@ -987,6 +1369,7 @@ export function App() {
   return (
     <main style={{ fontFamily: 'system-ui', padding: 16 }}>
       <h1>PHOODAB Pantry MVP</h1>
+      <button onClick={() => navigate('/locations')}>Browse Locations</button>
       {renderGlobalSearch()}
       <p>Health: {health}</p>
       <p>Version: {version}</p>
@@ -1026,7 +1409,12 @@ export function App() {
         <input placeholder="Quantity" type="number" step="any" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
         <input placeholder="Unit" value={unit} onChange={(e) => setUnit(e.target.value)} />
         <input type="date" value={expiryDate} onChange={(e) => setExpiryDate(e.target.value)} />
-        <input placeholder="Storage slot ID (optional)" value={storageSlotId} onChange={(e) => setStorageSlotId(e.target.value)} />
+        <StorageSlotTreePicker
+          label="Consumable storage slot"
+          nodes={locationTree}
+          selectedId={storageSlotId}
+          onSelect={setStorageSlotId}
+        />
         <button type="submit">Add Entry</button>
       </form>
 
@@ -1101,10 +1489,15 @@ export function App() {
             onChange={(e) => setDurableFormField('warrantyEndsOn', e.target.value)}
           />
           <input
-            aria-label="Durable item storage slot"
-            placeholder="Storage slot ID (optional)"
+            type="hidden"
             value={durableForm.storageSlotId}
-            onChange={(e) => setDurableFormField('storageSlotId', e.target.value)}
+            readOnly
+          />
+          <StorageSlotTreePicker
+            label="Durable item storage slot"
+            nodes={locationTree}
+            selectedId={durableForm.storageSlotId}
+            onSelect={(id) => setDurableFormField('storageSlotId', id)}
           />
           <input
             aria-label="Durable item description"
@@ -1128,7 +1521,7 @@ export function App() {
         <ul>
           {visibleDurableItems.map((item) => {
             const name = getDurableDisplayName(item);
-            const location = item.currentLocation || item.storageSlotId || 'No location set';
+            const location = item.currentLocation || formatLocationPath(locationTree, item.storageSlotId);
             return (
               <li key={item.id ?? `${name}-${item.itemDefinitionId ?? ''}`} style={{ marginBottom: 12 }}>
                 <strong>{name}</strong>: {item.itemType || 'Uncategorized'} [{item.status}]
@@ -1178,7 +1571,7 @@ export function App() {
             const edit = entryEdits[entry.entryId] ?? toEntryEdit(entry);
             const actionEdit = entryActionEdits[entry.entryId] ?? toEntryActionEdit(entry);
             const expiryStyle = getExpiryStyle(entry.expiryStatus);
-            const lotLocation = entry.storageSlotId || 'No location set';
+            const lotLocation = formatLocationPath(locationTree, entry.storageSlotId);
             return (
               <li
                 key={entry.entryId}
@@ -1257,12 +1650,12 @@ export function App() {
                     value={edit.expiresOn}
                     onChange={(e) => setEntryEdit(entry.entryId, { expiresOn: e.target.value })}
                   />
-                  <input
-                    aria-label={`Entry storage slot for ${entry.itemName}`}
-                    placeholder="Storage slot ID (optional)"
-                    value={edit.storageSlotId}
-                    onChange={(e) => setEntryEdit(entry.entryId, { storageSlotId: e.target.value })}
-                  />
+                    <StorageSlotTreePicker
+                      label={`Entry storage slot for ${entry.itemName}`}
+                      nodes={locationTree}
+                      selectedId={edit.storageSlotId}
+                      onSelect={(id) => setEntryEdit(entry.entryId, { storageSlotId: id })}
+                    />
                   <button onClick={() => onSaveConsumableEntry(entry)}>Adjust Quantity / Expiry / Location</button>
                   <button onClick={() => onResetEntryEdit(entry)}>Undo Unsaved Changes</button>
                 </div>
