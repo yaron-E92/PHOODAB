@@ -679,7 +679,7 @@ public sealed class MainPage : ContentPage
             : DurableDetailCard(selected));
     }
 
-    private static View DurableDetailCard(DurableItem item)
+    private View DurableDetailCard(DurableItem item)
     {
         var layout = new VerticalStackLayout { Spacing = 4 };
         layout.Children.Add(new Label { Text = item.DisplayName, FontAttributes = FontAttributes.Bold });
@@ -2056,12 +2056,12 @@ public sealed class MainPage : ContentPage
         return string.IsNullOrWhiteSpace(item.ItemType) ? "Uncategorized" : item.ItemType;
     }
 
-    private static string DurableLocation(DurableItem item)
+    private string DurableLocation(DurableItem item)
     {
         return !string.IsNullOrWhiteSpace(item.CurrentLocation)
-            ? item.CurrentLocation
+            ? DisplayLocation(item.CurrentLocation)
             : !string.IsNullOrWhiteSpace(item.StorageSlotId)
-                ? item.StorageSlotId
+                ? DisplayLocation(item.StorageSlotId)
                 : "No location set";
     }
 
