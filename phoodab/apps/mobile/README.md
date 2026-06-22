@@ -26,10 +26,21 @@ owns application-facing dependency registration and future shared ViewModel
 composition that can be referenced by both this standalone host and a
 SecondBrain host.
 
+## Current presentation inventory
+
+| Area | Standalone host ownership |
+| --- | --- |
+| Views | `MainPage` is host-specific and remains in this project. It owns the current dashboard, inventory, shopping, location, and durable-item screens as code-built MAUI controls. |
+| ViewModels | No separate reusable ViewModel classes exist yet. Presentation state currently embedded in `MainPage` should move to `../mobile-shared` only when it becomes host-neutral. |
+| Navigation | `App` wraps the standalone `MainPage` in a `NavigationPage`; `MainPage` owns the current page switching controls. |
+| Resources | Standalone colors, labels, visual choices, and future MAUI resources belong here. |
+| Platform services | Android and Windows startup files and app identifiers belong here. |
+| Startup wiring | `MauiProgram` builds the standalone MAUI app, calls `AddPhoodabSharedPresentation`, and registers standalone pages. |
+
 The current views stay host-specific. SecondBrain integration should reference
-`Phoodab.Mobile.Shared` for shared services and ViewModel-facing composition,
-then provide its own shell, navigation, resources, and views where the
-experience diverges.
+`Phoodab.Mobile.Shared` for shared services and future ViewModel-facing
+composition, then provide its own shell, navigation, resources, platform
+integrations, and views where the experience diverges.
 
 The standalone host uses the shared PHOODAB application services in-process for
 normal local pantry data, so it does not require a separately hosted backend for
