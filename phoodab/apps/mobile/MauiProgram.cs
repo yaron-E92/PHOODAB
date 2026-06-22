@@ -1,5 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
-using Phoodab.Application;
+using Phoodab.Mobile.Shared;
 
 namespace Phoodab.Mobile;
 
@@ -10,9 +10,7 @@ public static class MauiProgram
         var builder = MauiApp.CreateBuilder();
         builder.UseMauiApp<App>();
 
-        builder.Services.AddSingleton<IUtcDateProvider, SystemUtcDateProvider>();
-        builder.Services.AddSingleton<ReplenishmentSuggestionService>();
-        builder.Services.AddSingleton<IInventoryMvpStore, FileInventoryMvpStore>();
+        builder.Services.AddPhoodabSharedPresentation();
         builder.Services.AddSingleton<MainPage>();
 
         return builder.Build();

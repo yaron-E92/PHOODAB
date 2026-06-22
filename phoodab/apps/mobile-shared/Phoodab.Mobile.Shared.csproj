@@ -11,41 +11,18 @@
     <CanTargetAndroid Condition="'$(CanTargetAndroid)' == ''">false</CanTargetAndroid>
     <CanTargetWindows Condition="'$(CanTargetWindows)' == '' and Exists('$(MauiSdkPackPath)') and $([MSBuild]::IsOSPlatform('windows'))">true</CanTargetWindows>
     <CanTargetWindows Condition="'$(CanTargetWindows)' == ''">false</CanTargetWindows>
-    <EnableMauiTargets Condition="'$(EnableMauiTargets)' == '' and ('$(CanTargetAndroid)' == 'true' or '$(CanTargetWindows)' == 'true')">true</EnableMauiTargets>
-    <EnableMauiTargets Condition="'$(EnableMauiTargets)' == ''">false</EnableMauiTargets>
     <TargetFramework Condition="'$(CanTargetAndroid)' == 'true' and '$(CanTargetWindows)' != 'true'">net10.0-android</TargetFramework>
     <TargetFramework Condition="'$(CanTargetWindows)' == 'true' and '$(CanTargetAndroid)' != 'true'">net10.0-windows10.0.19041.0</TargetFramework>
     <TargetFrameworks Condition="'$(CanTargetAndroid)' == 'true' and '$(CanTargetWindows)' == 'true'">net10.0-android;net10.0-windows10.0.19041.0</TargetFrameworks>
-    <TargetFramework Condition="'$(EnableMauiTargets)' != 'true'">net10.0</TargetFramework>
-    <OutputType Condition="'$(EnableMauiTargets)' == 'true'">Exe</OutputType>
-    <RootNamespace>Phoodab.Mobile</RootNamespace>
-    <UseMaui Condition="'$(EnableMauiTargets)' == 'true'">true</UseMaui>
-    <SingleProject Condition="'$(EnableMauiTargets)' == 'true'">true</SingleProject>
+    <TargetFramework Condition="'$(CanTargetAndroid)' != 'true' and '$(CanTargetWindows)' != 'true'">net10.0</TargetFramework>
+    <RootNamespace>Phoodab.Mobile.Shared</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <ApplicationTitle>PHOODAB</ApplicationTitle>
-    <ApplicationId>com.phoodab.mobile</ApplicationId>
-    <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
-    <ApplicationVersion>1</ApplicationVersion>
-    <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">24.0</SupportedOSPlatformVersion>
-    <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</SupportedOSPlatformVersion>
-    <TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</TargetPlatformMinVersion>
-    <WindowsPackageType>None</WindowsPackageType>
   </PropertyGroup>
 
-  <ItemGroup Condition="'$(EnableMauiTargets)' == 'true'">
-    <PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
-  </ItemGroup>
-
-  <ItemGroup Condition="'$(EnableMauiTargets)' != 'true'">
-    <Compile Remove="App.cs;MainPage.cs;MauiProgram.cs;Platforms/**/*.cs" />
-  </ItemGroup>
-
-  <ItemGroup Condition="'$(EnableMauiTargets)' == 'true'">
-    <Compile Remove="MauiWorkloadPlaceholder.cs" />
-  </ItemGroup>
-
   <ItemGroup>
-    <ProjectReference Include="..\mobile-shared\Phoodab.Mobile.Shared.csproj" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.0" />
+    <ProjectReference Include="..\..\backend\src\Phoodab.Application\Phoodab.Application.csproj" />
+    <ProjectReference Include="..\..\backend\src\Phoodab.Domain\Phoodab.Domain.csproj" />
   </ItemGroup>
 </Project>
