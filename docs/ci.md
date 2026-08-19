@@ -5,7 +5,7 @@ PHOODAB CI validates the repository as a monorepo rather than treating the root 
 ## Product surfaces
 
 - Backend: `phoodab/backend/Phoodab.sln` restore, build, tests, and TRX results.
-- Web: the root npm workspace install plus TypeScript, Vitest, and Vite production build for `phoodab/apps/web`.
+- Web: the root npm workspace install plus Vitest and the Vite production build for `phoodab/apps/web`.
 - API client: build and start the local API, generate `phoodab/packages/api-client/src/generated.ts` twice, require deterministic output, and fail on committed-client drift.
 - Mobile shared/headless: build `Phoodab.Mobile.Shared.csproj` and the non-MAUI `net10.0` shape of `Phoodab.Mobile.csproj`.
 - MAUI Android: install the Android workload, restore, build `net10.0-android`, and run the repository Android doctor check.
@@ -23,14 +23,17 @@ dotnet build phoodab/backend/Phoodab.sln --configuration Debug --no-restore
 dotnet test phoodab/backend/Phoodab.sln --configuration Debug --no-build --no-restore
 ```
 
+The backend projects consume `Yaref92.Events` from GitHub Packages, so local restore also requires credentials for the `https://nuget.pkg.github.com/yaron-E92/index.json` feed.
+
 Web:
 
 ```bash
 npm ci
-npm exec --workspace phoodab/apps/web -- tsc --noEmit
 npm test --workspace phoodab/apps/web
 npm run build --workspace phoodab/apps/web
 ```
+
+The web project currently has no `tsconfig.json` and does not define a standalone typecheck script. CI therefore validates the project using its declared Vitest and Vite build contracts instead of inventing a non-project command.
 
 API-client drift requires the API to be available at `http://localhost:5199`:
 
@@ -69,4 +72,4 @@ dotnet restore phoodab/apps/mobile/Phoodab.Mobile.csproj
 dotnet build phoodab/apps/mobile/Phoodab.Mobile.csproj --configuration Debug --no-restore -f net10.0-windows10.0.19041.0
 ```
 
-The CI package-feed setup uses the repository `GITHUB_TOKEN` with `packages: read`; it does not depend on a date-stamped personal-access-token secret.
+CI authenticates package restore with the repository `GITHUB_TOKEN` scoped to `packages: read`; it does not depend on a date-stamped personal-access-token secret.
