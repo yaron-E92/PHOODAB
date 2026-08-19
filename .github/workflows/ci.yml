@@ -246,7 +246,7 @@ jobs:
       - name: Install Node dependencies
         run: npm ci
 
-      - name: Build API and verify deterministic client generation
+      - name: Build API and generate deterministic client
         shell: bash
         run: |
           set -euo pipefail
@@ -287,6 +287,19 @@ jobs:
             exit 1
           }
 
+      - name: Upload generated API client candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: phoodab-generated-api-client
+          path: phoodab/packages/api-client/src/generated.ts
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Require generated API client is current
+        shell: bash
+        run: |
+          set -euo pipefail
+          generated="phoodab/packages/api-client/src/generated.ts"
           git diff --exit-code -- "$generated" || {
             echo "Generated API client is stale; regenerate and commit $generated." >&2
             exit 1
