@@ -5,211 +5,399 @@ on:
     branches:
       - main
   pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
+permissions:
+  contents: read
+  packages: read
+
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-# Centralized runtime versions for CI jobs.
-# Update these defaults when the stack support policy is formalized.
-env:
-  NODE_VERSION: '20'
-  DOTNET_VERSION: '10.0.x'
-
 jobs:
+  baseline:
+    name: Shared workflow policy
+    uses: yaron-E92/AutoDev/.github/workflows/profile-baseline.yml@b10a3f2a7bd52e01c78554dbc317300e180d690e
+    with:
+      ref: ${{ github.sha }}
+      require_concurrency: true
+    permissions:
+      contents: read
+
   changes:
-    name: Detect project changes
+    name: Detect product surfaces
+    needs: [baseline]
     runs-on: ubuntu-latest
     outputs:
-      typescript_changed: ${{ steps.filter.outputs.typescript }}
-      dotnet_changed: ${{ steps.filter.outputs.dotnet }}
-      typescript_exists: ${{ steps.detect.outputs.typescript_exists }}
-      dotnet_exists: ${{ steps.detect.outputs.dotnet_exists }}
+      backend: ${{ steps.scope.outputs.backend }}
+      web: ${{ steps.scope.outputs.web }}
+      api_client: ${{ steps.scope.outputs.api_client }}
+      mobile_shared: ${{ steps.scope.outputs.mobile_shared }}
+      mobile: ${{ steps.scope.outputs.mobile }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Check out repository with history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
 
-      - name: Detect changed paths
-        id: filter
+      - name: Resolve affected product surfaces
+        id: scope
         shell: bash
         env:
-          BASE_REF: ${{ github.event.pull_request.base.ref || '' }}
+          EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || '' }}
           HEAD_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
 
-          changed_files="$(mktemp)"
-          base_ref=""
+          backend=false
+          web=false
+          api_client=false
+          mobile_shared=false
+          mobile=false
+          all=false
 
-          if [[ -n "${BASE_REF:-}" ]]; then
-            git fetch --no-tags --depth=1 origin "$BASE_REF"
-            base_ref="FETCH_HEAD"
-          elif [[ -n "${BASE_SHA:-}" && ! "$BASE_SHA" =~ ^0+$ ]]; then
-            if git fetch --no-tags --depth=1 origin "$BASE_SHA"; then
-              base_ref="$BASE_SHA"
-            fi
-          fi
-
-          if [[ -n "$base_ref" ]]; then
-            git diff --name-only "$base_ref" "$HEAD_SHA" > "$changed_files"
+          if [[ "$EVENT_NAME" == "workflow_dispatch" || -z "$BASE_SHA" || "$BASE_SHA" =~ ^0+$ ]]; then
+            all=true
           else
-            git ls-files > "$changed_files"
+            changed_files="$(mktemp)"
+            git diff --name-only "$BASE_SHA" "$HEAD_SHA" > "$changed_files"
+
+            while IFS= read -r path; do
+              case "$path" in
+                .github/workflows/*)
+                  all=true
+                  ;;
+                package.json|package-lock.json)
+                  web=true
+                  api_client=true
+                  ;;
+                phoodab/backend/*)
+                  backend=true
+                  api_client=true
+                  mobile_shared=true
+                  mobile=true
+                  ;;
+                phoodab/apps/web/*)
+                  web=true
+                  ;;
+                phoodab/packages/api-client/*)
+                  api_client=true
+                  web=true
+                  ;;
+                phoodab/apps/mobile-shared/*)
+                  mobile_shared=true
+                  mobile=true
+                  ;;
+                phoodab/apps/mobile/*)
+                  mobile=true
+                  ;;
+              esac
+            done < "$changed_files"
           fi
 
-          typescript_pattern='(^|/)(package\.json|tsconfig\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$|\.tsx?$'
-          dotnet_pattern='\.(sln|csproj|fsproj|cs)$'
-
-          if grep -E -q "$typescript_pattern" "$changed_files"; then
-            echo "typescript=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "typescript=false" >> "$GITHUB_OUTPUT"
+          if [[ "$all" == true ]]; then
+            backend=true
+            web=true
+            api_client=true
+            mobile_shared=true
+            mobile=true
           fi
 
-          if grep -E -q "$dotnet_pattern" "$changed_files"; then
-            echo "dotnet=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "dotnet=false" >> "$GITHUB_OUTPUT"
-          fi
+          {
+            echo "backend=$backend"
+            echo "web=$web"
+            echo "api_client=$api_client"
+            echo "mobile_shared=$mobile_shared"
+            echo "mobile=$mobile"
+          } >> "$GITHUB_OUTPUT"
 
-      - name: Detect repository project files (bootstrap-safe)
-        id: detect
-        shell: bash
-        run: |
-          set -euo pipefail
-          tracked_files="$(mktemp)"
-          git ls-files > "$tracked_files"
-
-          typescript_pattern='(^|/)(package\.json|tsconfig\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$|\.tsx?$'
-          dotnet_pattern='\.(sln|csproj|fsproj|cs)$'
-
-          if grep -E -q "$typescript_pattern" "$tracked_files"; then
-            echo "typescript_exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "typescript_exists=false" >> "$GITHUB_OUTPUT"
-          fi
-
-          if grep -E -q "$dotnet_pattern" "$tracked_files"; then
-            echo "dotnet_exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "dotnet_exists=false" >> "$GITHUB_OUTPUT"
-          fi
+          {
+            echo "### PHOODAB CI scope"
+            echo
+            echo "- backend: \`$backend\`"
+            echo "- web: \`$web\`"
+            echo "- API client: \`$api_client\`"
+            echo "- mobile shared: \`$mobile_shared\`"
+            echo "- MAUI products: \`$mobile\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   validate:
-    name: Validate repository
+    name: Repository validation
+    needs: [baseline]
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Verify required files
+        shell: bash
         run: |
           set -euo pipefail
           test -f README.md
           test -f docs/adr/ADR-001-initial-architecture.md
+          test -f package.json
+          test -f package-lock.json
+          test -f phoodab/backend/Phoodab.sln
+          test -f phoodab/apps/web/package.json
+          test -f phoodab/packages/api-client/package.json
+          test -f phoodab/apps/mobile-shared/Phoodab.Mobile.Shared.csproj
+          test -f phoodab/apps/mobile/Phoodab.Mobile.csproj
 
       - name: Markdown formatting smoke check
         shell: bash
         run: |
           set -euo pipefail
-          # Fail on tabs or trailing whitespace in markdown files.
           mapfile -t markdown_files < <(git ls-files '*.md')
           if ((${#markdown_files[@]} == 0)); then
-            exit 0
+            echo "No Markdown files found." >&2
+            exit 1
           fi
-
           if grep -nE $'\t|[ \t]+$' "${markdown_files[@]}"; then
             exit 1
           fi
 
-  typescript:
-    name: TypeScript checks
+  backend:
+    name: Backend .NET
+    needs: [baseline, changes]
+    if: needs.changes.outputs.backend == 'true'
+    uses: yaron-E92/AutoDev/.github/workflows/profile-dotnet.yml@b10a3f2a7bd52e01c78554dbc317300e180d690e
+    with:
+      ref: ${{ github.sha }}
+      working_directory: phoodab/backend
+      global_json_file: ''
+      dotnet_version: 10.0.x
+      setup_command: |
+        dotnet nuget remove source github >/dev/null 2>&1 || true
+        dotnet nuget add source https://nuget.pkg.github.com/yaron-E92/index.json --name github --username github-actions --password "$NUGET_AUTH_TOKEN" --store-password-in-clear-text
+      restore_command: dotnet restore Phoodab.sln
+      build_command: dotnet build Phoodab.sln --configuration Debug --no-restore
+      test_command: mkdir -p ../../../artifacts/test-results/backend && dotnet test Phoodab.sln --configuration Debug --no-build --no-restore --logger "trx" --results-directory ../../../artifacts/test-results/backend
+      test_results_path: 'artifacts/test-results/backend/*.trx'
+      artifact_name: phoodab-backend-test-results
+    secrets:
+      nuget_token: ${{ secrets.GITHUB_TOKEN }}
+    permissions:
+      contents: read
+      packages: read
+
+  web:
+    name: Web application
+    needs: [baseline, changes]
+    if: needs.changes.outputs.web == 'true'
+    uses: yaron-E92/AutoDev/.github/workflows/profile-node-next.yml@b10a3f2a7bd52e01c78554dbc317300e180d690e
+    with:
+      ref: ${{ github.sha }}
+      node_version: '20'
+      working_directory: .
+      cache: true
+      package_manager: npm
+      cache_dependency_path: package-lock.json
+      install_command: npm ci
+      lint_command: ''
+      typecheck_command: npm exec --workspace phoodab/apps/web -- tsc --noEmit
+      test_command: npm test --workspace phoodab/apps/web
+      build_command: npm run build --workspace phoodab/apps/web
+      artifact_name: phoodab-web-build
+      artifact_path: phoodab/apps/web/dist
+    permissions:
+      contents: read
+
+  api-client-drift:
+    name: Generated API client drift
+    needs: [baseline, changes]
+    if: needs.changes.outputs.api_client == 'true'
     runs-on: ubuntu-latest
-    needs: changes
-    # Bootstrap-safe: skip entirely when there are no TS files yet.
-    if: needs.changes.outputs.typescript_changed == 'true' || needs.changes.outputs.typescript_exists == 'true'
+    permissions:
+      contents: read
+      packages: read
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          # Uses the workflow-level default; change env.NODE_VERSION above to upgrade globally.
-          node-version: ${{ env.NODE_VERSION }}
+          dotnet-version: 10.0.x
 
-      - name: Install dependencies
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Configure package feed
         shell: bash
+        env:
+          NUGET_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          if [[ -f pnpm-lock.yaml ]]; then
-            corepack enable
-            pnpm install --frozen-lockfile
-          elif [[ -f yarn.lock ]]; then
-            corepack enable
-            yarn install --frozen-lockfile
-          elif [[ -f package-lock.json ]]; then
-            npm ci
-          elif [[ -f package.json ]]; then
-            npm install
-          else
-            echo "No Node package manifest in repo root; skipping TS job steps."
-            exit 0
-          fi
-
-      - name: Lint (if script exists)
-        run: npm run lint --if-present
-
-      - name: Typecheck/build (if script exists)
-        run: |
-          npm run typecheck --if-present
-          npm run build --if-present
-
-      - name: Test (if script exists)
-        run: npm test --if-present
-
-  dotnet:
-    name: .NET checks
-    runs-on: ubuntu-latest
-    needs: changes
-    # Bootstrap-safe: skip entirely when there are no .NET files yet.
-    if: needs.changes.outputs.dotnet_changed == 'true' || needs.changes.outputs.dotnet_exists == 'true'
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          # Uses the workflow-level default; change env.DOTNET_VERSION above to upgrade globally.
-          dotnet-version: ${{ env.DOTNET_VERSION }}
-
-      - name: Ensure GitHub NuGet Source
-        shell: pwsh
-        env:
-          NUGET_TOKEN: ${{ secrets.YARE92_NUGET_TOKEN_EXP_17JUN2026 }}
-        run: |
-          dotnet nuget add source https://nuget.pkg.github.com/yaron-E92/index.json `
-            -n github `
-            -u Yaron-E92 `
-            -p $env:NUGET_TOKEN `
+          dotnet nuget remove source github >/dev/null 2>&1 || true
+          dotnet nuget add source https://nuget.pkg.github.com/yaron-E92/index.json \
+            --name github \
+            --username github-actions \
+            --password "$NUGET_TOKEN" \
             --store-password-in-clear-text
 
-      - name: Restore
-        shell: bash
-        run: |
-          set -euo pipefail
-          dotnet restore phoodab/backend/*.sln
+      - name: Install Node dependencies
+        run: npm ci
 
-      - name: Build
+      - name: Build API and verify deterministic client generation
         shell: bash
         run: |
           set -euo pipefail
-          dotnet build --no-restore phoodab/backend/*.sln
+          api_project="phoodab/backend/src/Phoodab.Api/Phoodab.Api.csproj"
+          generated="phoodab/packages/api-client/src/generated.ts"
+          api_log="$RUNNER_TEMP/phoodab-api.log"
+          first_generation="$RUNNER_TEMP/generated-first.ts"
 
-      - name: Test
+          dotnet restore "$api_project"
+          dotnet build "$api_project" --configuration Debug --no-restore
+
+          ASPNETCORE_ENVIRONMENT=Development \
+          ASPNETCORE_URLS=http://127.0.0.1:5199 \
+            dotnet run --project "$api_project" --configuration Debug --no-build --no-restore >"$api_log" 2>&1 &
+          api_pid=$!
+          trap 'kill "$api_pid" >/dev/null 2>&1 || true' EXIT
+
+          ready=false
+          for _ in {1..60}; do
+            if curl --fail --silent --show-error http://127.0.0.1:5199/swagger/v1/swagger.json >/dev/null; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+
+          if [[ "$ready" != true ]]; then
+            cat "$api_log" >&2
+            echo "PHOODAB API did not expose Swagger in time." >&2
+            exit 1
+          fi
+
+          npm run generate --workspace phoodab/packages/api-client
+          cp "$generated" "$first_generation"
+          npm run generate --workspace phoodab/packages/api-client
+          cmp --silent "$first_generation" "$generated" || {
+            echo "API client generation is not deterministic." >&2
+            exit 1
+          }
+
+          git diff --exit-code -- "$generated" || {
+            echo "Generated API client is stale; regenerate and commit $generated." >&2
+            exit 1
+          }
+
+  mobile-shared:
+    name: Mobile shared/headless
+    needs: [baseline, changes]
+    if: needs.changes.outputs.mobile_shared == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore headless mobile projects
         shell: bash
         run: |
           set -euo pipefail
-          dotnet test --no-build phoodab/backend/*.sln
+          dotnet restore phoodab/apps/mobile-shared/Phoodab.Mobile.Shared.csproj -p:CanTargetAndroid=false -p:CanTargetWindows=false
+          dotnet restore phoodab/apps/mobile/Phoodab.Mobile.csproj -p:CanTargetAndroid=false -p:CanTargetWindows=false -p:EnableMauiTargets=false
+
+      - name: Build mobile shared and headless app shape
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet build phoodab/apps/mobile-shared/Phoodab.Mobile.Shared.csproj --configuration Debug --no-restore -p:CanTargetAndroid=false -p:CanTargetWindows=false
+          dotnet build phoodab/apps/mobile/Phoodab.Mobile.csproj --configuration Debug --no-restore -p:CanTargetAndroid=false -p:CanTargetWindows=false -p:EnableMauiTargets=false
+
+  maui-products:
+    name: MAUI product validation
+    needs: [baseline, changes]
+    if: needs.changes.outputs.mobile == 'true'
+    uses: yaron-E92/AutoDev/.github/workflows/profile-maui.yml@b10a3f2a7bd52e01c78554dbc317300e180d690e
+    with:
+      ref: ${{ github.sha }}
+      global_json_file: ''
+      dotnet_version: 10.0.x
+      headless_enabled: false
+      android_enabled: true
+      android_setup_command: dotnet workload install maui-android --skip-manifest-update
+      android_restore_command: dotnet restore phoodab/apps/mobile/Phoodab.Mobile.csproj
+      android_build_command: bash phoodab/apps/mobile/scripts/maui-android-ubuntu.sh build -c Debug --no-restore
+      android_test_command: bash phoodab/apps/mobile/scripts/maui-android-ubuntu.sh doctor
+      windows_enabled: true
+      windows_setup_command: dotnet workload install maui --skip-manifest-update
+      windows_restore_command: dotnet restore phoodab/apps/mobile/Phoodab.Mobile.csproj
+      windows_build_command: dotnet build phoodab/apps/mobile/Phoodab.Mobile.csproj --configuration Debug --no-restore -f net10.0-windows10.0.19041.0
+      windows_test_command: test -n "$(find phoodab/apps/mobile/bin/Debug -type f -name 'Phoodab.Mobile.dll' -print -quit)"
+    permissions:
+      contents: read
+
+  ci-gate:
+    name: CI gate
+    if: always()
+    needs:
+      - baseline
+      - changes
+      - validate
+      - backend
+      - web
+      - api-client-drift
+      - mobile-shared
+      - maui-products
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every applicable validation surface
+        shell: bash
+        env:
+          BASELINE: ${{ needs.baseline.result }}
+          CHANGES: ${{ needs.changes.result }}
+          VALIDATE: ${{ needs.validate.result }}
+          BACKEND: ${{ needs.backend.result }}
+          WEB: ${{ needs.web.result }}
+          API_CLIENT: ${{ needs.api-client-drift.result }}
+          MOBILE_SHARED: ${{ needs.mobile-shared.result }}
+          MAUI: ${{ needs.maui-products.result }}
+        run: |
+          set -euo pipefail
+
+          require_success() {
+            local name="$1"
+            local result="$2"
+            if [[ "$result" != "success" ]]; then
+              echo "$name must succeed; got $result" >&2
+              exit 1
+            fi
+          }
+
+          require_success_or_skip() {
+            local name="$1"
+            local result="$2"
+            if [[ "$result" != "success" && "$result" != "skipped" ]]; then
+              echo "$name must succeed when applicable; got $result" >&2
+              exit 1
+            fi
+          }
+
+          require_success baseline "$BASELINE"
+          require_success changes "$CHANGES"
+          require_success repository-validation "$VALIDATE"
+          require_success_or_skip backend "$BACKEND"
+          require_success_or_skip web "$WEB"
+          require_success_or_skip api-client "$API_CLIENT"
+          require_success_or_skip mobile-shared "$MOBILE_SHARED"
+          require_success_or_skip maui "$MAUI"
+
+          echo "All applicable PHOODAB CI surfaces passed."
