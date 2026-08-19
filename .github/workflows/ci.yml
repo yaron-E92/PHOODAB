@@ -18,7 +18,7 @@ concurrency:
 jobs:
   baseline:
     name: Shared workflow policy
-    uses: yaron-E92/AutoDev/.github/workflows/profile-baseline.yml@6ae09976c9dfa174a2d736df3ba7d37ab8953129
+    uses: yaron-E92/AutoDev/.github/workflows/profile-baseline.yml@728e043428b0adffb2ff4e4a0ff89046051bd28a
     with:
       ref: ${{ github.sha }}
       require_concurrency: true
@@ -161,7 +161,7 @@ jobs:
     name: Backend .NET
     needs: [baseline, changes]
     if: needs.changes.outputs.backend == 'true'
-    uses: yaron-E92/AutoDev/.github/workflows/profile-dotnet.yml@6ae09976c9dfa174a2d736df3ba7d37ab8953129
+    uses: yaron-E92/AutoDev/.github/workflows/profile-dotnet.yml@728e043428b0adffb2ff4e4a0ff89046051bd28a
     with:
       ref: ${{ github.sha }}
       working_directory: phoodab/backend
@@ -185,7 +185,7 @@ jobs:
     name: Web application
     needs: [baseline, changes]
     if: needs.changes.outputs.web == 'true'
-    uses: yaron-E92/AutoDev/.github/workflows/profile-node-next.yml@6ae09976c9dfa174a2d736df3ba7d37ab8953129
+    uses: yaron-E92/AutoDev/.github/workflows/profile-node-next.yml@728e043428b0adffb2ff4e4a0ff89046051bd28a
     with:
       ref: ${{ github.sha }}
       node_version: '20'
@@ -336,7 +336,7 @@ jobs:
     name: MAUI product validation
     needs: [baseline, changes]
     if: needs.changes.outputs.mobile == 'true'
-    uses: yaron-E92/AutoDev/.github/workflows/profile-maui.yml@6ae09976c9dfa174a2d736df3ba7d37ab8953129
+    uses: yaron-E92/AutoDev/.github/workflows/profile-maui.yml@728e043428b0adffb2ff4e4a0ff89046051bd28a
     with:
       ref: ${{ github.sha }}
       global_json_file: ''
@@ -354,6 +354,7 @@ jobs:
       windows_test_command: test -n "$(find phoodab/apps/mobile/bin/Debug -type f -name 'Phoodab.Mobile.dll' -print -quit)"
     permissions:
       contents: read
+      packages: read
 
   ci-gate:
     name: CI gate
