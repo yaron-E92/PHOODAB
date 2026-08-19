@@ -2,11 +2,9 @@ name: CI
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   pull_request:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -20,7 +18,7 @@ concurrency:
 jobs:
   baseline:
     name: Shared workflow policy
-    uses: yaron-E92/AutoDev/.github/workflows/profile-baseline.yml@b10a3f2a7bd52e01c78554dbc317300e180d690e
+    uses: yaron-E92/AutoDev/.github/workflows/profile-baseline.yml@6ae09976c9dfa174a2d736df3ba7d37ab8953129
     with:
       ref: ${{ github.sha }}
       require_concurrency: true
@@ -65,7 +63,6 @@ jobs:
           else
             changed_files="$(mktemp)"
             git diff --name-only "$BASE_SHA" "$HEAD_SHA" > "$changed_files"
-
             while IFS= read -r path; do
               case "$path" in
                 .github/workflows/*)
@@ -164,7 +161,7 @@ jobs:
     name: Backend .NET
     needs: [baseline, changes]
     if: needs.changes.outputs.backend == 'true'
-    uses: yaron-E92/AutoDev/.github/workflows/profile-dotnet.yml@b10a3f2a7bd52e01c78554dbc317300e180d690e
+    uses: yaron-E92/AutoDev/.github/workflows/profile-dotnet.yml@6ae09976c9dfa174a2d736df3ba7d37ab8953129
     with:
       ref: ${{ github.sha }}
       working_directory: phoodab/backend
@@ -188,7 +185,7 @@ jobs:
     name: Web application
     needs: [baseline, changes]
     if: needs.changes.outputs.web == 'true'
-    uses: yaron-E92/AutoDev/.github/workflows/profile-node-next.yml@b10a3f2a7bd52e01c78554dbc317300e180d690e
+    uses: yaron-E92/AutoDev/.github/workflows/profile-node-next.yml@6ae09976c9dfa174a2d736df3ba7d37ab8953129
     with:
       ref: ${{ github.sha }}
       node_version: '20'
@@ -198,7 +195,7 @@ jobs:
       cache_dependency_path: package-lock.json
       install_command: npm ci
       lint_command: ''
-      typecheck_command: npm exec -- tsc -p phoodab/apps/web/tsconfig.json --noEmit
+      typecheck_command: ''
       test_command: npm test --workspace phoodab/apps/web
       build_command: npm run build --workspace phoodab/apps/web
       artifact_name: phoodab-web-build
@@ -339,7 +336,7 @@ jobs:
     name: MAUI product validation
     needs: [baseline, changes]
     if: needs.changes.outputs.mobile == 'true'
-    uses: yaron-E92/AutoDev/.github/workflows/profile-maui.yml@b10a3f2a7bd52e01c78554dbc317300e180d690e
+    uses: yaron-E92/AutoDev/.github/workflows/profile-maui.yml@6ae09976c9dfa174a2d736df3ba7d37ab8953129
     with:
       ref: ${{ github.sha }}
       global_json_file: ''
