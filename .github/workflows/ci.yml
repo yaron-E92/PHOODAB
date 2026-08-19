@@ -198,7 +198,7 @@ jobs:
       cache_dependency_path: package-lock.json
       install_command: npm ci
       lint_command: ''
-      typecheck_command: npm exec --workspace phoodab/apps/web -- tsc --noEmit
+      typecheck_command: npm exec -- tsc -p phoodab/apps/web/tsconfig.json --noEmit
       test_command: npm test --workspace phoodab/apps/web
       build_command: npm run build --workspace phoodab/apps/web
       artifact_name: phoodab-web-build
