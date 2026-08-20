@@ -2,16 +2,18 @@
 
 PHOODAB CI validates the repository as a monorepo rather than treating the root as one Node or .NET project. The workflow uses path-aware product surfaces and finishes with one stable `CI gate` that requires every applicable surface to succeed.
 
+Common orchestration is provided by immutable AutoDev workflow profiles: the backend uses the shared .NET profile, the web app uses the shared Node/Vite profile, and mobile validation uses one shared MAUI caller for its headless, Android, and Windows legs. Repository-local jobs remain only where the behavior is genuinely PHOODAB-specific, such as path/surface detection, repository invariants, and deterministic API-client generation that deliberately spans .NET, Node, and a live local API process.
+
 ## Product surfaces
 
 - Backend: `phoodab/backend/Phoodab.sln` restore, build, tests, and TRX results.
 - Web: the root npm workspace install plus Vitest and the Vite production build for `phoodab/apps/web`.
 - API client: build and start the local API, generate `phoodab/packages/api-client/src/generated.ts` twice, require deterministic output, and fail on committed-client drift.
-- Mobile shared/headless: build `Phoodab.Mobile.Shared.csproj` and the non-MAUI `net10.0` shape of `Phoodab.Mobile.csproj`.
+- Mobile shared/headless: build `Phoodab.Mobile.Shared.csproj` and the non-MAUI `net10.0` shape of `Phoodab.Mobile.csproj`, then require both built assemblies. This is the shared MAUI profile's headless leg.
 - MAUI Android: install the Android workload, restore, build `net10.0-android`, and run the repository Android doctor check.
 - MAUI Windows: install MAUI, restore, build `net10.0-windows10.0.19041.0`, and require the built application assembly.
 
-Workflow changes run all product surfaces. Backend changes also run API-client and mobile validation because the client and mobile-shared layers depend on backend contracts. Mobile-shared changes run both shared/headless and MAUI product validation. Docs-only changes keep repository and workflow-policy validation but do not manufacture unrelated product work.
+Workflow changes run all product surfaces. Backend changes also run API-client and mobile validation because the client and mobile-shared layers depend on backend contracts. Mobile-shared changes run the complete shared mobile profile: headless, Android, and Windows. Docs-only changes keep repository and workflow-policy validation but do not manufacture unrelated product work.
 
 ## Local equivalents
 
@@ -72,4 +74,4 @@ dotnet restore phoodab/apps/mobile/Phoodab.Mobile.csproj
 dotnet build phoodab/apps/mobile/Phoodab.Mobile.csproj --configuration Debug --no-restore -f net10.0-windows10.0.19041.0
 ```
 
-CI authenticates package restore with the repository `GITHUB_TOKEN` scoped to `packages: read`; it does not depend on a date-stamped personal-access-token secret.
+CI authenticates package restore with the repository `GITHUB_TOKEN` scoped to `packages: read`; it does not depend on a date-stamped personal-access-token secret. Version-intent validation and trusted tag advancement are separate workflows; CI profile adoption does not publish releases or move release responsibilities into the validation workflow.
