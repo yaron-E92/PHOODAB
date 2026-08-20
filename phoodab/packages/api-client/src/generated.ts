@@ -132,13 +132,6 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Not Found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
             };
         };
         delete?: never;
@@ -159,7 +152,6 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    /** Format: uuid */
                     entryId: string;
                 };
                 cookie?: never;
@@ -327,6 +319,24 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
+                    content: {
+                        "application/json": components["schemas"]["ConsumableEntry"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
                     content?: never;
                 };
             };
@@ -372,6 +382,15 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["ConsumableEntryReadModel"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
                 /** @description Not Found */
@@ -678,6 +697,274 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/locations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    includeArchived?: boolean;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["LocationReadModel"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CreateLocationRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["LocationReadModel"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/locations/tree": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["LocationTreeNodeReadModel"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/locations/{locationId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    locationId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["LocationDetailReadModel"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    locationId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    locationId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["UpdateLocationRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["LocationReadModel"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/api/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    q?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["GlobalSearchResultReadModel"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/replenishment/suggestions": {
         parameters: {
             query?: never;
@@ -698,22 +985,40 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        ConsumableEntry: {
+            /** Format: uuid */
+            readonly id?: string;
+            /** Format: uuid */
+            readonly itemDefinitionId?: string;
+            itemDefinition?: components["schemas"]["ItemDefinition"];
+            /** Format: uuid */
+            readonly storageSlotId?: string | null;
+            /** Format: uuid */
+            readonly locationId?: string | null;
+            kind?: components["schemas"]["ItemKind"];
+            quantity?: components["schemas"]["Quantity"];
+            unit?: components["schemas"]["Unit"];
+            /** Format: date */
+            expiresOn?: string | null;
+        };
         ConsumableEntryReadModel: {
             /** Format: uuid */
-            entryId: string;
+            entryId?: string;
             /** Format: uuid */
-            itemDefinitionId: string;
-            itemName: string;
+            itemDefinitionId?: string;
+            itemName?: string | null;
             /** Format: double */
-            quantity: number;
-            unit: string;
+            quantity?: number;
+            unit?: string | null;
             /** Format: date */
             expiresOn?: string | null;
             /** Format: int32 */
             expiresInDays?: number | null;
-            expiryStatus: string;
+            expiryStatus?: string | null;
             /** Format: uuid */
             storageSlotId?: string | null;
+            /** Format: uuid */
+            readonly locationId?: string | null;
         };
         CreateConsumableEntryRequest: {
             /** Format: uuid */
@@ -725,6 +1030,8 @@ export interface components {
             expiresOn?: string | null;
             /** Format: uuid */
             storageSlotId?: string | null;
+            /** Format: uuid */
+            locationId?: string | null;
         };
         CreateDurableEntryRequest: {
             /** Format: uuid */
@@ -746,6 +1053,8 @@ export interface components {
             notes?: string | null;
             /** Format: uuid */
             storageSlotId?: string | null;
+            /** Format: uuid */
+            locationId?: string | null;
         };
         CreateItemDefinitionRequest: {
             name?: string | null;
@@ -753,6 +1062,15 @@ export interface components {
             /** Format: double */
             desiredAmount?: number | null;
             desiredUnit?: string | null;
+        };
+        CreateLocationRequest: {
+            name?: string | null;
+            type?: string | null;
+            /** Format: uuid */
+            parentLocationId?: string | null;
+            description?: string | null;
+            /** Format: int32 */
+            sortOrder?: number | null;
         };
         CreateShoppingListItemFromSuggestionRequest: {
             /** Format: uuid */
@@ -766,9 +1084,6 @@ export interface components {
             expiringSoonAmount?: number | null;
             /** Format: double */
             suggestedPurchaseAmount?: number | null;
-        };
-        HealthResponse: {
-            status: string;
         };
         DurableItemReadModel: {
             /** Format: uuid */
@@ -792,15 +1107,66 @@ export interface components {
             notes?: string | null;
             /** Format: uuid */
             storageSlotId?: string | null;
+            /** Format: uuid */
+            readonly locationId?: string | null;
         };
         ErrorResponse: {
             message: string;
+        };
+        GlobalSearchResultReadModel: {
+            kind?: string | null;
+            typeLabel?: string | null;
+            id?: string | null;
+            title?: string | null;
+            location?: string | null;
+            state?: string | null;
+        };
+        HealthResponse: {
+            status: string;
+        };
+        ItemDefinition: {
+            /** Format: uuid */
+            id?: string;
+            name?: string | null;
+            kind?: components["schemas"]["ItemKind"];
         };
         /**
          * Format: int32
          * @enum {integer}
          */
         ItemKind: 0 | 1;
+        LocationDetailReadModel: {
+            location?: components["schemas"]["LocationReadModel"];
+            children?: components["schemas"]["LocationReadModel"][] | null;
+            consumables?: components["schemas"]["ConsumableEntryReadModel"][] | null;
+            durableItems?: components["schemas"]["DurableItemReadModel"][] | null;
+            /** Format: int32 */
+            childLocationCount?: number;
+            /** Format: int32 */
+            consumableCount?: number;
+            /** Format: int32 */
+            durableItemCount?: number;
+        };
+        LocationReadModel: {
+            /** Format: uuid */
+            id?: string;
+            name?: string | null;
+            type?: string | null;
+            /** Format: uuid */
+            parentLocationId?: string | null;
+            description?: string | null;
+            /** Format: int32 */
+            sortOrder?: number | null;
+            isArchived?: boolean;
+        };
+        LocationTreeNodeReadModel: {
+            location?: components["schemas"]["LocationReadModel"];
+            children?: components["schemas"]["LocationTreeNodeReadModel"][] | null;
+        };
+        Quantity: {
+            /** Format: double */
+            value?: number;
+        };
         ReplenishmentRuleResponse: {
             /** Format: uuid */
             id: string;
@@ -816,6 +1182,15 @@ export interface components {
         RetireDurableEntryRequest: {
             notes?: string | null;
         };
+        Unit: {
+            value?: string | null;
+            kind?: components["schemas"]["UnitEnum"];
+        };
+        /**
+         * Format: int32
+         * @enum {integer}
+         */
+        UnitEnum: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
         UpdateConsumableEntryRequest: {
             /** Format: double */
             quantity?: number;
@@ -824,6 +1199,8 @@ export interface components {
             expiresOn?: string | null;
             /** Format: uuid */
             storageSlotId?: string | null;
+            /** Format: uuid */
+            locationId?: string | null;
         };
         UpdateDurableEntryRequest: {
             displayName?: string | null;
@@ -843,6 +1220,17 @@ export interface components {
             notes?: string | null;
             /** Format: uuid */
             storageSlotId?: string | null;
+            /** Format: uuid */
+            locationId?: string | null;
+        };
+        UpdateLocationRequest: {
+            name?: string | null;
+            type?: string | null;
+            /** Format: uuid */
+            parentLocationId?: string | null;
+            description?: string | null;
+            /** Format: int32 */
+            sortOrder?: number | null;
         };
         UpdateReplenishmentRuleRequest: {
             /** Format: double */
