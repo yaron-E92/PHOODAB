@@ -33,7 +33,6 @@ jobs:
       backend: ${{ steps.scope.outputs.backend }}
       web: ${{ steps.scope.outputs.web }}
       api_client: ${{ steps.scope.outputs.api_client }}
-      mobile_shared: ${{ steps.scope.outputs.mobile_shared }}
       mobile: ${{ steps.scope.outputs.mobile }}
     steps:
       - name: Check out repository with history
@@ -54,7 +53,6 @@ jobs:
           backend=false
           web=false
           api_client=false
-          mobile_shared=false
           mobile=false
           all=false
 
@@ -75,7 +73,6 @@ jobs:
                 phoodab/backend/*)
                   backend=true
                   api_client=true
-                  mobile_shared=true
                   mobile=true
                   ;;
                 phoodab/apps/web/*)
@@ -85,11 +82,7 @@ jobs:
                   api_client=true
                   web=true
                   ;;
-                phoodab/apps/mobile-shared/*)
-                  mobile_shared=true
-                  mobile=true
-                  ;;
-                phoodab/apps/mobile/*)
+                phoodab/apps/mobile-shared/*|phoodab/apps/mobile/*)
                   mobile=true
                   ;;
               esac
@@ -100,7 +93,6 @@ jobs:
             backend=true
             web=true
             api_client=true
-            mobile_shared=true
             mobile=true
           fi
 
@@ -108,7 +100,6 @@ jobs:
             echo "backend=$backend"
             echo "web=$web"
             echo "api_client=$api_client"
-            echo "mobile_shared=$mobile_shared"
             echo "mobile=$mobile"
           } >> "$GITHUB_OUTPUT"
 
@@ -118,8 +109,7 @@ jobs:
             echo "- backend: \`$backend\`"
             echo "- web: \`$web\`"
             echo "- API client: \`$api_client\`"
-            echo "- mobile shared: \`$mobile_shared\`"
-            echo "- MAUI products: \`$mobile\`"
+            echo "- mobile/headless + MAUI: \`$mobile\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
   validate:
@@ -302,38 +292,8 @@ jobs:
             exit 1
           }
 
-  mobile-shared:
-    name: Mobile shared/headless
-    needs: [baseline, changes]
-    if: needs.changes.outputs.mobile_shared == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      - name: Set up .NET SDK
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
-        with:
-          dotnet-version: 10.0.x
-
-      - name: Restore headless mobile projects
-        shell: bash
-        run: |
-          set -euo pipefail
-          dotnet restore phoodab/apps/mobile-shared/Phoodab.Mobile.Shared.csproj -p:CanTargetAndroid=false -p:CanTargetWindows=false
-          dotnet restore phoodab/apps/mobile/Phoodab.Mobile.csproj -p:CanTargetAndroid=false -p:CanTargetWindows=false -p:EnableMauiTargets=false
-
-      - name: Build mobile shared and headless app shape
-        shell: bash
-        run: |
-          set -euo pipefail
-          dotnet build phoodab/apps/mobile-shared/Phoodab.Mobile.Shared.csproj --configuration Debug --no-restore -p:CanTargetAndroid=false -p:CanTargetWindows=false
-          dotnet build phoodab/apps/mobile/Phoodab.Mobile.csproj --configuration Debug --no-restore -p:CanTargetAndroid=false -p:CanTargetWindows=false -p:EnableMauiTargets=false
-
   maui-products:
-    name: MAUI product validation
+    name: Mobile and MAUI validation
     needs: [baseline, changes]
     if: needs.changes.outputs.mobile == 'true'
     uses: yaron-E92/AutoDev/.github/workflows/profile-maui.yml@7190410c74ab6674d1c8cc647b178bbc4b5cdd54
@@ -341,7 +301,19 @@ jobs:
       ref: ${{ github.sha }}
       global_json_file: ''
       dotnet_version: 10.0.x
-      headless_enabled: false
+      headless_enabled: true
+      headless_restore_command: |
+        set -euo pipefail
+        dotnet restore phoodab/apps/mobile-shared/Phoodab.Mobile.Shared.csproj -p:CanTargetAndroid=false -p:CanTargetWindows=false
+        dotnet restore phoodab/apps/mobile/Phoodab.Mobile.csproj -p:CanTargetAndroid=false -p:CanTargetWindows=false -p:EnableMauiTargets=false
+      headless_build_command: |
+        set -euo pipefail
+        dotnet build phoodab/apps/mobile-shared/Phoodab.Mobile.Shared.csproj --configuration Debug --no-restore -p:CanTargetAndroid=false -p:CanTargetWindows=false
+        dotnet build phoodab/apps/mobile/Phoodab.Mobile.csproj --configuration Debug --no-restore -p:CanTargetAndroid=false -p:CanTargetWindows=false -p:EnableMauiTargets=false
+      headless_test_command: |
+        set -euo pipefail
+        test -n "$(find phoodab/apps/mobile-shared/bin/Debug -type f -name 'Phoodab.Mobile.Shared.dll' -print -quit)"
+        test -n "$(find phoodab/apps/mobile/bin/Debug -type f -name 'Phoodab.Mobile.dll' -print -quit)"
       android_enabled: true
       android_setup_command: dotnet workload install maui-android --skip-manifest-update
       android_restore_command: dotnet restore phoodab/apps/mobile/Phoodab.Mobile.csproj
@@ -366,7 +338,6 @@ jobs:
       - backend
       - web
       - api-client-drift
-      - mobile-shared
       - maui-products
     runs-on: ubuntu-latest
     steps:
@@ -379,7 +350,6 @@ jobs:
           BACKEND: ${{ needs.backend.result }}
           WEB: ${{ needs.web.result }}
           API_CLIENT: ${{ needs.api-client-drift.result }}
-          MOBILE_SHARED: ${{ needs.mobile-shared.result }}
           MAUI: ${{ needs.maui-products.result }}
         run: |
           set -euo pipefail
@@ -408,7 +378,6 @@ jobs:
           require_success_or_skip backend "$BACKEND"
           require_success_or_skip web "$WEB"
           require_success_or_skip api-client "$API_CLIENT"
-          require_success_or_skip mobile-shared "$MOBILE_SHARED"
-          require_success_or_skip maui "$MAUI"
+          require_success_or_skip mobile "$MAUI"
 
           echo "All applicable PHOODAB CI surfaces passed."
