@@ -1,0 +1,8 @@
+version: 1
+priority:
+  - issue: 71
+  - issue: 72
+  - issue: 95
+  - issue: 92
+  - issue: 93
+fallback: oldest
