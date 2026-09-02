@@ -51,9 +51,18 @@ gh run list --repo yaron-E92/PHOODAB --branch <pr-branch> --limit 5
 
 ## MVP Demo Flow
 
-- Start backend (`dotnet run` in `phoodab/backend/src/Phoodab.Api`) with `ASPNETCORE_ENVIRONMENT=Development` to auto-seed Milk, Eggs, Pasta, and Rice demo data.
+- Demo data is opt-in and development-only. From `phoodab/backend/src/Phoodab.Api`, create it without overwriting an existing local store:
+  ```bash
+  ASPNETCORE_ENVIRONMENT=Development DemoData__Mode=Seed dotnet run
+  ```
+- To discard local changes and recreate the same canonical demo household, stop the API and run:
+  ```bash
+  ASPNETCORE_ENVIRONMENT=Development DemoData__Mode=Reset dotnet run
+  ```
+- `Seed` only writes when the local store is completely empty. `Reset` replaces the local MVP store with fixed IDs and dates relative to the current UTC day, so the journeys remain repeatable. After reset, use `Seed` for normal starts if desired.
+- `DemoData__Mode` accepts only `Seed` or `Reset`. The API ignores it outside the Development environment, protecting production data from demo seeding and resets.
 - Start web (`npm run dev` in `phoodab/apps/web`).
-- Open the app and review **Inventory Summary**, **Expiring / Expired Lots**, and **Replenishment Suggestions**.
-- In **Replenishment Suggestions**, click **Add to Shopping List**.
-- In **Shopping List**, click **Mark Purchased** for the created row.
-- Expected result: suggestion becomes a shopping-list item and updates to Purchased/Resolved.
+- Open the app and review the low Milk stock, expired Greek Yogurt, soon-expiring Eggs, and replenishment suggestions.
+- Review shopping rows in **Shopping List**, **In Cart / Buying**, and **Stock Update Needed** states.
+- Browse **Maple House → Kitchen → Pantry Cabinet → Eye-level Shelf** to see consumables and durable items together.
+- Review the Stand Mixer warranty and the Toaster in **NeedsRepair** status.

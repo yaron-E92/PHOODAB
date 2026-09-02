@@ -1115,6 +1115,56 @@ describe('pantry mvp page', () => {
     expect(container.textContent).not.toContain('Location: unit-1');
   });
 
+  it('loads the demo dashboard, inventory, shopping, durable, and location surfaces', async () => {
+    getInventorySummaryMock.mockResolvedValue([
+      { itemDefinitionId: 'milk', itemName: 'Milk', totalQuantity: 0.5, unit: 'liter', entryCount: 1, hasMixedUnits: false, mixedUnitWarning: null }
+    ]);
+    getConsumableEntriesMock.mockResolvedValue([
+      { entryId: 'yogurt-lot', itemDefinitionId: 'yogurt', itemName: 'Greek Yogurt', quantity: 2, unit: 'cup', expiresOn: '2026-09-01', expiresInDays: -1, expiryStatus: 'Expired', storageSlotId: 'slot-1' }
+    ]);
+    getExpiringConsumableEntriesMock.mockResolvedValue([
+      { entryId: 'yogurt-lot', itemName: 'Greek Yogurt', quantity: 2, unit: 'cup', expiresOn: '2026-09-01', expiresInDays: -1, expiryStatus: 'Expired' }
+    ]);
+    getReplenishmentSuggestionsMock.mockResolvedValue([
+      { itemDefinitionId: 'milk', itemName: 'Milk', requiredAmount: 1.5, desiredQuantity: 2, currentQuantity: 0.5, usableCurrentQuantity: 0.5, deficitAmount: 1.5, expiringSoonAmount: 0, suggestedPurchaseAmount: 1.5, unit: 'liter', entries: [] }
+    ]);
+    getShoppingListItemsMock.mockResolvedValue([
+      { id: 'rice-shopping', itemDefinitionId: 'rice', itemName: 'Basmati Rice', quantity: 1, unit: 'kg', isResolved: false, isPurchased: true, status: 'StockUpdateNeeded', stockUpdateNeeded: true, nextInventoryAction: 'Add stock details for quantity, lot, expiry, and location.', sourceDeficitAmount: 0, sourceExpiringSoonAmount: 0, sourceSuggestedPurchaseAmount: 1 }
+    ]);
+    getDurableItemsMock.mockResolvedValue([
+      { id: 'toaster', itemDefinitionId: 'toaster-definition', displayName: 'Toaster', itemType: 'Kitchen appliance', status: 'NeedsRepair', currentLocation: 'Pantry Cabinet', storageSlotId: 'slot-1' }
+    ]);
+    getLocationTreeMock.mockResolvedValue(storageSlotTree);
+
+    const { App } = await import('./main');
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<App />);
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain('PHOODAB Pantry MVP');
+    expect(container.textContent).toContain('Inventory Summary');
+    expect(container.textContent).toContain('Milk: 0.5 liter');
+    expect(container.textContent).toContain('Greek Yogurt - 2 cup - Expired');
+    expect(container.textContent).toContain('Milk: 1.5 liter');
+    expect(container.textContent).toContain('Basmati Rice: 1 kg [Stock update needed]');
+    expect(container.textContent).toContain('Toaster: Kitchen appliance [NeedsRepair]');
+
+    await act(async () => {
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Browse Locations')!.click();
+    });
+
+    expect(window.location.pathname).toBe('/locations');
+    expect(container.textContent).toContain('Locations');
+    expect(container.textContent).toContain('Home (House)');
+
+    expect(container.textContent).toContain('Top shelf (StorageSlot)');
+  });
+
   it('shows basic error state', async () => {
     getInventorySummaryMock.mockRejectedValue(new Error('boom'));
 

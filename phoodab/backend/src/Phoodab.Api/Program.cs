@@ -24,12 +24,24 @@ builder.Services.AddSingleton<IInventoryMvpStore, FileInventoryMvpStore>();
 
 var app = builder.Build();
 
-if (app.Environment.IsDevelopment())
+var demoDataMode = app.Configuration["DemoData:Mode"];
+if (app.Environment.IsDevelopment() && !string.IsNullOrWhiteSpace(demoDataMode))
 {
     using var scope = app.Services.CreateScope();
     var store = scope.ServiceProvider.GetRequiredService<IInventoryMvpStore>();
     var utcDateProvider = scope.ServiceProvider.GetRequiredService<IUtcDateProvider>();
-    store.EnsureDevelopmentSeedData(utcDateProvider.TodayUtc);
+    if (demoDataMode.Equals("Seed", StringComparison.OrdinalIgnoreCase))
+    {
+        store.EnsureDevelopmentSeedData(utcDateProvider.TodayUtc);
+    }
+    else if (demoDataMode.Equals("Reset", StringComparison.OrdinalIgnoreCase))
+    {
+        store.ResetDevelopmentSeedData(utcDateProvider.TodayUtc);
+    }
+    else
+    {
+        throw new InvalidOperationException("DemoData:Mode must be either 'Seed' or 'Reset'.");
+    }
 }
 
 app.UseCors("FrontendDev");
