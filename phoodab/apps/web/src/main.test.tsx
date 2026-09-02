@@ -1162,15 +1162,6 @@ describe('pantry mvp page', () => {
     expect(container.textContent).toContain('Locations');
     expect(container.textContent).toContain('Home (House)');
 
-    await act(async () => {
-      clickByLabel(container, 'Toggle location Home');
-    });
-    await act(async () => {
-      clickByLabel(container, 'Toggle location Kitchen');
-    });
-    await act(async () => {
-      clickByLabel(container, 'Toggle location Pantry cabinet');
-    });
     expect(container.textContent).toContain('Top shelf (StorageSlot)');
   });
 
