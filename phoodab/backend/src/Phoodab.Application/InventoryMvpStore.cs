@@ -48,6 +48,7 @@ public interface IInventoryMvpStore
     ReplenishmentRule? UpdateRule(Guid ruleId, decimal? desiredAmount, string? desiredUnit, bool? isDisabled, int? expiryWarningDays);
     IReadOnlyList<ConsumableEntry> GetConsumableEntries();
     void EnsureDevelopmentSeedData(DateOnly todayUtc);
+    void ResetDevelopmentSeedData(DateOnly todayUtc);
     object CreateOrUpdateShoppingListItemFromSuggestion(Guid itemDefinitionId, decimal quantity, string unit, decimal? deficitAmount, decimal? expiringSoonAmount, decimal? suggestedPurchaseAmount);
     object? UpdateShoppingListItemStatus(Guid shoppingListItemId, bool? isResolved, bool? isPurchased, string? status);
     bool DeleteShoppingListItem(Guid shoppingListItemId);
@@ -430,17 +431,22 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
         lock (_sync)
         {
             var state = LoadState();
-            if (state.DurableEntries.Count > 0 || state.ConsumableEntries.Count > 0)
+            if (state.ItemDefinitions.Count > 0 || state.DurableEntries.Count > 0 ||
+                state.ConsumableEntries.Count > 0 || state.Rules.Count > 0 ||
+                state.ShoppingListItems.Count > 0 || state.Locations.Count > 0)
             {
                 return;
             }
 
-            SeedItem(state, "Milk", 2m, "liter", todayUtc.AddDays(14));
-            SeedItem(state, "Eggs", 1m, "dozen", todayUtc.AddDays(2));
-            SeedItem(state, "Pasta", 0.5m, "kg", todayUtc.AddDays(-1));
-            SeedItem(state, "Rice", 0.25m, "kg", null);
+            SaveState(CreateDevelopmentSeedState(todayUtc));
+        }
+    }
 
-            SaveState(state);
+    public void ResetDevelopmentSeedData(DateOnly todayUtc)
+    {
+        lock (_sync)
+        {
+            SaveState(CreateDevelopmentSeedState(todayUtc));
         }
     }
 
@@ -905,13 +911,98 @@ public sealed class FileInventoryMvpStore : IInventoryMvpStore
         public List<LocationState> Locations { get; set; } = [];
     }
 
-    private static void SeedItem(InventoryMvpState state, string name, decimal quantity, string unit, DateOnly? expiresOn)
+    private static InventoryMvpState CreateDevelopmentSeedState(DateOnly todayUtc)
     {
-        var item = new ItemDefinitionState(Guid.NewGuid(), name, ItemKind.Consumable);
-        state.ItemDefinitions.Add(item);
+        var state = new InventoryMvpState();
 
-        state.ConsumableEntries.Add(new ConsumableEntryState(Guid.NewGuid(), item.Id, quantity, unit, expiresOn, null));
-        state.Rules.Add(CreateDefaultRule(item.Id, unit: unit));
+        var houseId = Guid.Parse("10000000-0000-0000-0000-000000000001");
+        var roomId = Guid.Parse("10000000-0000-0000-0000-000000000002");
+        var storageUnitId = Guid.Parse("10000000-0000-0000-0000-000000000003");
+        var storageSlotId = Guid.Parse("10000000-0000-0000-0000-000000000004");
+        state.Locations.AddRange([
+            new LocationState(houseId, "Maple House", LocationType.House, null, "Demo household", 1, false),
+            new LocationState(roomId, "Kitchen", LocationType.Room, houseId, "Main household kitchen", 1, false),
+            new LocationState(storageUnitId, "Pantry Cabinet", LocationType.StorageUnit, roomId, "Dry goods and small appliances", 1, false),
+            new LocationState(storageSlotId, "Eye-level Shelf", LocationType.StorageSlot, storageUnitId, "Frequently used household items", 1, false)
+        ]);
+
+        var milkId = AddSeedConsumable(state, "20000000-0000-0000-0000-000000000001", "Milk", 0.5m, "liter", todayUtc.AddDays(10), storageSlotId, 2m, 3);
+        AddSeedConsumable(state, "20000000-0000-0000-0000-000000000002", "Greek Yogurt", 2m, "cup", todayUtc.AddDays(-1), storageSlotId, 4m, 3);
+        var eggsId = AddSeedConsumable(state, "20000000-0000-0000-0000-000000000003", "Eggs", 1m, "dozen", todayUtc.AddDays(2), storageSlotId, 2m, 3);
+        var riceId = AddSeedConsumable(state, "20000000-0000-0000-0000-000000000004", "Basmati Rice", 3m, "kg", null, storageSlotId, 2m, 2);
+
+        state.ShoppingListItems.AddRange([
+            new ShoppingListItemState(Guid.Parse("40000000-0000-0000-0000-000000000001"), milkId, "Milk", 1.5m, "liter", false, false, ShoppingStatusShoppingList, 1.5m, 0m, 1.5m),
+            new ShoppingListItemState(Guid.Parse("40000000-0000-0000-0000-000000000002"), eggsId, "Eggs", 1m, "dozen", false, false, ShoppingStatusInCart, 1m, 1m, 2m),
+            new ShoppingListItemState(Guid.Parse("40000000-0000-0000-0000-000000000003"), riceId, "Basmati Rice", 1m, "kg", false, true, ShoppingStatusStockUpdateNeeded, 0m, 0m, 1m)
+        ]);
+
+        AddSeedDurable(state, "50000000-0000-0000-0000-000000000001", "Stand Mixer", storageSlotId,
+            todayUtc.AddYears(-1), todayUtc.AddYears(1), DurableItemStatus.Active, "Warranty paperwork is in the kitchen folder.");
+        AddSeedDurable(state, "50000000-0000-0000-0000-000000000002", "Toaster", storageSlotId,
+            todayUtc.AddYears(-3), null, DurableItemStatus.NeedsRepair, "Heating element is intermittent; repair estimate needed.");
+
+        return state;
+    }
+
+    private static Guid AddSeedConsumable(
+        InventoryMvpState state,
+        string idPrefix,
+        string name,
+        decimal quantity,
+        string unit,
+        DateOnly? expiresOn,
+        Guid storageSlotId,
+        decimal desiredAmount,
+        int expiryWarningDays)
+    {
+        var itemId = Guid.Parse(idPrefix);
+        state.ItemDefinitions.Add(new ItemDefinitionState(itemId, name, ItemKind.Consumable));
+        state.ConsumableEntries.Add(new ConsumableEntryState(
+            Guid.Parse(idPrefix.Replace("20000000", "30000000", StringComparison.Ordinal)),
+            itemId,
+            quantity,
+            unit,
+            expiresOn,
+            storageSlotId));
+        state.Rules.Add(new ReplenishmentRuleState(
+            Guid.Parse(idPrefix.Replace("20000000", "60000000", StringComparison.Ordinal)),
+            itemId,
+            desiredAmount,
+            unit,
+            expiryWarningDays,
+            false,
+            false));
+        return itemId;
+    }
+
+    private static void AddSeedDurable(
+        InventoryMvpState state,
+        string itemIdValue,
+        string name,
+        Guid storageSlotId,
+        DateOnly purchaseDate,
+        DateOnly? warrantyEndsOn,
+        DurableItemStatus status,
+        string notes)
+    {
+        var itemId = Guid.Parse(itemIdValue);
+        state.ItemDefinitions.Add(new ItemDefinitionState(itemId, name, ItemKind.Durable));
+        state.DurableEntries.Add(new DurableEntryState(
+            Guid.Parse(itemIdValue.Replace("50000000", "70000000", StringComparison.Ordinal)),
+            itemId,
+            storageSlotId,
+            $"Demo {name.ToLowerInvariant()}",
+            "Kitchen appliance",
+            "Northwind Home",
+            null,
+            null,
+            purchaseDate,
+            null,
+            warrantyEndsOn,
+            status,
+            "Maple House › Kitchen › Pantry Cabinet › Eye-level Shelf",
+            notes));
     }
 
     private static bool NormalizeState(InventoryMvpState state)

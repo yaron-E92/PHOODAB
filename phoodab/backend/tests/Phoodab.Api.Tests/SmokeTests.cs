@@ -6,6 +6,7 @@ using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using NUnit.Framework;
 using Phoodab.Domain;
@@ -237,21 +238,85 @@ public class SmokeTests
     [Test]
     public async Task Development_seed_data_contains_demo_stock_and_expiry_mix()
     {
+        RecreateFactory("Seed");
+
+        var summary = JsonSerializer.Deserialize<JsonElement>(await (await _client.GetAsync("/api/inventory/summary")).Content.ReadAsStringAsync())
+            .EnumerateArray().ToList();
+        Assert.That(summary.Select(x => x.GetProperty("itemName").GetString()), Is.SupersetOf(new[] { "Milk", "Greek Yogurt", "Eggs", "Basmati Rice" }));
+
         var suggestions = JsonSerializer.Deserialize<JsonElement>(await (await _client.GetAsync("/api/replenishment/suggestions")).Content.ReadAsStringAsync())
             .EnumerateArray().ToList();
 
-        Assert.That(suggestions.Select(x => x.GetProperty("itemName").GetString()), Is.SupersetOf(new[] { "Milk", "Eggs", "Pasta", "Rice" }));
+        Assert.That(suggestions.Select(x => x.GetProperty("itemName").GetString()), Is.SupersetOf(new[] { "Milk", "Greek Yogurt", "Eggs", "Basmati Rice" }));
 
         var milk = suggestions.Single(x => x.GetProperty("itemName").GetString() == "Milk");
         var eggs = suggestions.Single(x => x.GetProperty("itemName").GetString() == "Eggs");
-        var pasta = suggestions.Single(x => x.GetProperty("itemName").GetString() == "Pasta");
-        var rice = suggestions.Single(x => x.GetProperty("itemName").GetString() == "Rice");
+        var yogurt = suggestions.Single(x => x.GetProperty("itemName").GetString() == "Greek Yogurt");
 
-        Assert.That(milk.GetProperty("requiredAmount").GetDecimal(), Is.EqualTo(0m));
+        Assert.That(milk.GetProperty("requiredAmount").GetDecimal(), Is.GreaterThan(0m));
         Assert.That(eggs.GetProperty("requiredAmount").GetDecimal(), Is.GreaterThan(0m));
-        Assert.That(rice.GetProperty("requiredAmount").GetDecimal(), Is.GreaterThan(0m));
         Assert.That(eggs.GetProperty("entries").EnumerateArray().Single().GetProperty("expiryStatus").GetString(), Is.EqualTo("Urgent"));
-        Assert.That(pasta.GetProperty("entries").EnumerateArray().Single().GetProperty("expiryStatus").GetString(), Is.EqualTo("Expired"));
+        Assert.That(yogurt.GetProperty("entries").EnumerateArray().Single().GetProperty("expiryStatus").GetString(), Is.EqualTo("Expired"));
+
+        var shopping = JsonSerializer.Deserialize<JsonElement>(await (await _client.GetAsync("/api/shopping-list-items")).Content.ReadAsStringAsync())
+            .EnumerateArray().ToList();
+        Assert.That(shopping.Select(x => x.GetProperty("status").GetString()), Is.SupersetOf(new[] { "ShoppingList", "InCart", "StockUpdateNeeded" }));
+        Assert.That(shopping.Single(x => x.GetProperty("status").GetString() == "StockUpdateNeeded").GetProperty("stockUpdateNeeded").GetBoolean(), Is.True);
+
+        var durables = JsonSerializer.Deserialize<JsonElement>(await (await _client.GetAsync("/api/durable-entries")).Content.ReadAsStringAsync())
+            .EnumerateArray().ToList();
+        Assert.That(durables.Single(x => x.GetProperty("displayName").GetString() == "Stand Mixer").GetProperty("warrantyEndsOn").ValueKind, Is.Not.EqualTo(JsonValueKind.Null));
+        Assert.That(durables.Single(x => x.GetProperty("displayName").GetString() == "Toaster").GetProperty("status").GetString(), Is.EqualTo("NeedsRepair"));
+
+        var locationTree = JsonSerializer.Deserialize<JsonElement>(await (await _client.GetAsync("/api/locations/tree")).Content.ReadAsStringAsync());
+        var slot = locationTree[0].GetProperty("children")[0].GetProperty("children")[0].GetProperty("children")[0].GetProperty("location");
+        Assert.That(slot.GetProperty("name").GetString(), Is.EqualTo("Eye-level Shelf"));
+
+        var locationDetail = JsonSerializer.Deserialize<JsonElement>(await (await _client.GetAsync($"/api/locations/{slot.GetProperty("id").GetGuid()}")).Content.ReadAsStringAsync());
+        Assert.Multiple(() =>
+        {
+            Assert.That(locationDetail.GetProperty("consumableCount").GetInt32(), Is.GreaterThan(0));
+            Assert.That(locationDetail.GetProperty("durableItemCount").GetInt32(), Is.GreaterThan(0));
+        });
+    }
+
+    [Test]
+    public async Task Demo_seed_is_idempotent_and_reset_restores_the_canonical_state()
+    {
+        RecreateFactory("Seed");
+        var customItemId = await CreateConsumableItem("Developer snack");
+
+        RecreateFactory("Seed");
+        var afterEnsure = JsonSerializer.Deserialize<JsonElement>(await (await _client.GetAsync("/api/inventory/summary")).Content.ReadAsStringAsync())
+            .EnumerateArray().ToList();
+        Assert.That(afterEnsure.Any(x => x.GetProperty("itemDefinitionId").GetGuid() == customItemId), Is.False, "An item without a lot should not appear in summary.");
+        var rulesAfterEnsure = JsonSerializer.Deserialize<JsonElement>(await (await _client.GetAsync("/api/replenishment/rules")).Content.ReadAsStringAsync())
+            .EnumerateArray().ToList();
+        Assert.That(rulesAfterEnsure.Any(x => x.GetProperty("itemDefinitionId").GetGuid() == customItemId), Is.True);
+
+        RecreateFactory("Reset");
+        var rulesAfterReset = JsonSerializer.Deserialize<JsonElement>(await (await _client.GetAsync("/api/replenishment/rules")).Content.ReadAsStringAsync())
+            .EnumerateArray().ToList();
+        Assert.That(rulesAfterReset.Any(x => x.GetProperty("itemDefinitionId").GetGuid() == customItemId), Is.False);
+        Assert.That(rulesAfterReset.Single(x => x.GetProperty("itemDefinitionId").GetGuid() == Guid.Parse("20000000-0000-0000-0000-000000000001"))
+            .GetProperty("desiredAmount").GetDecimal(), Is.EqualTo(2m));
+    }
+
+    [Test]
+    public async Task Production_ignores_demo_data_configuration()
+    {
+        _client.Dispose();
+        _factory.Dispose();
+        ResetStoreFile();
+        _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.UseEnvironment("Production");
+            builder.UseSetting("DemoData:Mode", "Reset");
+        });
+        _client = _factory.CreateClient();
+
+        var summary = JsonSerializer.Deserialize<JsonElement>(await (await _client.GetAsync("/api/inventory/summary")).Content.ReadAsStringAsync());
+        Assert.That(summary.GetArrayLength(), Is.Zero);
     }
 
     [Test]
@@ -857,6 +922,15 @@ public class SmokeTests
         Assert.That(itemResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
         var item = JsonSerializer.Deserialize<JsonElement>(await itemResponse.Content.ReadAsStringAsync());
         return item.GetProperty("id").GetGuid();
+    }
+
+    private void RecreateFactory(string demoDataMode)
+    {
+        _client.Dispose();
+        _factory.Dispose();
+        _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+            builder.UseSetting("DemoData:Mode", demoDataMode));
+        _client = _factory.CreateClient();
     }
 
     private async Task<JsonElement> GetRuleForItem(Guid itemId)
