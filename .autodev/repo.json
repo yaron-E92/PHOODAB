@@ -2,5 +2,10 @@
   "opencode": {
     "enabled": true
   },
+  "ux": {
+    "enabled": true,
+    "artifact": "oci://ghcr.io/yaron-e92/ux/phoodab@sha256:206d70faae38af5af7560ba4ef50c74b7669a1cd1a826138f233e3ab95e88aa2",
+    "product": "phoodab"
+  },
   "version": 1
 }
